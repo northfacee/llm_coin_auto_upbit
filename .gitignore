@@ -1,0 +1,28 @@
+# 환경 변수 파일
+.env
+
+# 파이썬 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상 환경
+venv/
+env/
+ENV/
+
+# 로그 파일
+*.log
+trading_analysis_log.jsonl
+
+# IDE 설정
+.vscode/
+.idea/
+
+# 데이터베이스 파일
+*.db
+*.sqlite3
+
+# 기타 민감한 정보
+config.json
+credentials.json
