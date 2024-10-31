@@ -26,3 +26,5 @@ trading_analysis_log.jsonl
 # 기타 민감한 정보
 config.json
 credentials.json
+
+echo "bith/" >> .gitignore
