@@ -27,4 +27,4 @@ trading_analysis_log.jsonl
 config.json
 credentials.json
 
-echo "bith/" >> .gitignore
+bith/
