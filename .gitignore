@@ -28,3 +28,5 @@ config.json
 credentials.json
 
 bith/
+
+analysis.py

@@ -13,7 +13,7 @@
 
 1. 저장소 클론
 ```bash
-git clone https://github.com/your-username/crypto-trading-bot.git
+git clone https://github.com/your-username/test.git
 cd crypto-trading-bot
 ```
 
@@ -33,13 +33,16 @@ pip install -r requirements.txt
 ```
 OPENAI_API_KEY=your_openai_api_key
 LANGSMITH_API_KEY=your_langsmith_api_key
-LANGCHAIN_API_KEY=your_langchain_api_key
+NAVER_CLIENT_ID=
+NAVER_CLIENT_SECRET=
+
+
 ```
 
 ## 실행 방법
 
 ```bash
-python analyze_market.py
+python run_trading_analysis.py
 ```
 
 ## 주의사항

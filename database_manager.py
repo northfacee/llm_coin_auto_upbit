@@ -1,200 +1,198 @@
-from datetime import datetime
-import pandas as pd
 import sqlite3
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import Optional
 
 class DatabaseManager:
-    def __init__(self, db_name='crypto_data.db'):
-        self.db_name = db_name
-        self.init_database()
+    def __init__(self, db_path: str = "crypto_analysis.db"):
+        """데이터베이스 매니저 초기화"""
+        self.db_path = db_path
+        self._create_tables()
     
-    def init_database(self):
-        """데이터베이스 및 테이블 초기화"""
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        
-        # 시장 데이터 테이블
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS market_data (
-                timestamp DATETIME PRIMARY KEY,
-                market TEXT,
-                current_price REAL,
-                opening_price REAL,
-                high_price REAL,
-                low_price REAL,
-                prev_closing_price REAL,
-                acc_trade_volume_24h REAL,
-                acc_trade_price_24h REAL,
-                signed_change_rate REAL,
-                signed_change_price REAL
-            )
-        ''')
-        
-        # 거래 분석 테이블
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS trading_analysis (
-                timestamp DATETIME PRIMARY KEY,
-                current_price REAL,
-                decision TEXT,
-                investment_ratio INTEGER,
-                reason TEXT,
-                stop_loss REAL,
-                target_price REAL
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-    
-    def save_market_data(self, market_data):
-        """시장 데이터를 데이터베이스에 저장"""
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute('''
-                INSERT INTO market_data (
-                    timestamp, market, current_price, opening_price, high_price,
-                    low_price, prev_closing_price, acc_trade_volume_24h,
-                    acc_trade_price_24h, signed_change_rate, signed_change_price
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                market_data['timestamp'],
-                market_data['market'],
-                market_data['current_price'],
-                market_data['opening_price'],
-                market_data['high_price'],
-                market_data['low_price'],
-                market_data['prev_closing_price'],
-                market_data['acc_trade_volume_24h'],
-                market_data['acc_trade_price_24h'],
-                market_data['signed_change_rate'],
-                market_data['signed_change_price']
-            ))
-            conn.commit()
-        except sqlite3.Error as e:
-            print(f"데이터 저장 중 오류 발생: {e}")
-        finally:
-            conn.close()
-    
-    def save_analysis_result(self, timestamp, current_price, analysis_text):
-        """분석 결과를 데이터베이스에 저장"""
-        try:
-            # GPT 분석 결과 파싱
-            lines = analysis_text.split('\n')
-            decision = ""
-            investment_ratio = 0
-            reason = ""
-            stop_loss = 0
-            target_price = 0
-            
-            for line in lines:
-                if "투자 결정:" in line:
-                    decision_part = line.split(":")[1].strip()
-                    decision = decision_part.split("(")[0].strip()
-                    if "(" in decision_part:
-                        investment_ratio = int(decision_part.split("(")[1].split("%")[0])
-                elif "결정 이유:" in line:
-                    reason = line.split(":")[1].strip()
-                elif "손절가 제안:" in line:
-                    stop_loss = float(line.split(":")[1].split("원")[0].strip().replace(",", ""))
-                elif "목표가 제안:" in line:
-                    target_price = float(line.split(":")[1].split("원")[0].strip().replace(",", ""))
-
-            conn = sqlite3.connect(self.db_name)
+    def _create_tables(self):
+        """필요한 테이블들을 생성합니다."""
+        with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
-            cursor.execute('''
-                INSERT INTO trading_analysis 
-                (timestamp, current_price, decision, investment_ratio, reason, stop_loss, target_price)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                timestamp,
-                current_price,
-                decision,
-                investment_ratio,
-                reason,
-                stop_loss,
-                target_price
-            ))
+            # 뉴스 데이터 테이블
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS news (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    pub_date TIMESTAMP NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 시장 데이터 테이블
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS market_data (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP NOT NULL,
+                    current_price REAL NOT NULL,
+                    opening_price REAL NOT NULL,
+                    high_price REAL NOT NULL,
+                    low_price REAL NOT NULL,
+                    signed_change_rate REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 뉴스 분석 결과 테이블
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS news_analysis (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP NOT NULL,
+                    analysis_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 가격 분석 결과 테이블
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS price_analysis (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP NOT NULL,
+                    current_price REAL NOT NULL,
+                    analysis_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 최종 결정 테이블
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS final_decision (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP NOT NULL,
+                    current_price REAL NOT NULL,
+                    analysis_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             conn.commit()
-            conn.close()
+    
+    def save_news(self, title: str, description: str, pub_date: datetime):
+        """뉴스 데이터를 저장합니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO news (title, description, pub_date)
+                VALUES (?, ?, ?)
+            """, (title, description, pub_date))
+            conn.commit()
+    
+    def save_market_data(self, timestamp: datetime, current_price: float, 
+                        opening_price: float, high_price: float, 
+                        low_price: float, signed_change_rate: float):
+        """시장 데이터를 저장합니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO market_data (
+                    timestamp, current_price, opening_price, 
+                    high_price, low_price, signed_change_rate
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (timestamp, current_price, opening_price, 
+                 high_price, low_price, signed_change_rate))
+            conn.commit()
+    
+    def save_news_analysis(self, timestamp: datetime, analysis_text: str):
+        """뉴스 분석 결과를 저장합니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO news_analysis (timestamp, analysis_text)
+                VALUES (?, ?)
+            """, (timestamp, analysis_text))
+            conn.commit()
+    
+    def save_price_analysis(self, timestamp: datetime, current_price: float, analysis_text: str):
+        """가격 분석 결과를 저장합니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO price_analysis (timestamp, current_price, analysis_text)
+                VALUES (?, ?, ?)
+            """, (timestamp, current_price, analysis_text))
+            conn.commit()
+    
+    def save_final_decision(self, timestamp: datetime, current_price: float, analysis_text: str):
+        """최종 투자 결정을 저장합니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO final_decision (timestamp, current_price, analysis_text)
+                VALUES (?, ?, ?)
+            """, (timestamp, current_price, analysis_text))
+            conn.commit()
+    
+    def get_recent_news(self, hours: int = 24) -> pd.DataFrame:
+        """최근 뉴스를 가져옵니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            query = """
+                SELECT title, description, pub_date
+                FROM news
+                WHERE pub_date >= datetime('now', ?)
+                ORDER BY pub_date DESC
+            """
+            return pd.read_sql_query(query, conn, params=(f'-{hours} hours',))
+    
+    def get_market_data(self, hours: int = 24) -> pd.DataFrame:
+        """최근 시장 데이터를 가져옵니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            query = """
+                SELECT timestamp, current_price, opening_price, 
+                       high_price, low_price, signed_change_rate
+                FROM market_data
+                WHERE timestamp >= datetime('now', ?)
+                ORDER BY timestamp DESC
+            """
+            return pd.read_sql_query(query, conn, params=(f'-{hours} hours',))
+    
+    def get_latest_analyses(self) -> dict:
+        """가장 최근의 모든 분석 결과를 가져옵니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
             
-        except Exception as e:
-            print(f"분석 결과 저장 중 오류 발생: {e}")
-    
-    def get_market_data(self, hours=24):
-        """시장 데이터 조회"""
-        conn = sqlite3.connect(self.db_name)
-        
-        query = f'''
-            SELECT * FROM market_data 
-            WHERE timestamp >= datetime('now', '-{hours} hours')
-            ORDER BY timestamp ASC
-        '''
-        
-        df = pd.read_sql_query(query, conn, parse_dates=['timestamp'])
-        conn.close()
-        return df
-    
-    def get_analysis_data(self, hours=24):
-        """거래 분석 데이터 조회"""
-        conn = sqlite3.connect(self.db_name)
-        
-        query = f'''
-            SELECT * FROM trading_analysis
-            WHERE timestamp >= datetime('now', '-{hours} hours')
-            ORDER BY timestamp ASC
-        '''
-        
-        df = pd.read_sql_query(query, conn, parse_dates=['timestamp'])
-        conn.close()
-        return df
-    
-    def get_latest_price(self):
-        """최신 가격 데이터 조회"""
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT timestamp, current_price, signed_change_rate
-            FROM market_data
-            ORDER BY timestamp DESC
-            LIMIT 1
-        ''')
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
+            # 각 분석 유형별로 가장 최근 결과를 가져옴
+            news_analysis = cursor.execute("""
+                SELECT timestamp, current_price, analysis_text
+                FROM news_analysis
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """).fetchone()
+            
+            price_analysis = cursor.execute("""
+                SELECT timestamp, current_price, analysis_text
+                FROM price_analysis
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """).fetchone()
+            
+            final_decision = cursor.execute("""
+                SELECT timestamp, current_price, analysis_text
+                FROM final_decision
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """).fetchone()
+            
             return {
-                'timestamp': result[0],
-                'price': result[1],
-                'change_rate': result[2]
+                'news_analysis': {
+                    'timestamp': news_analysis[0] if news_analysis else None,
+                    'current_price': news_analysis[1] if news_analysis else None,
+                    'analysis': news_analysis[2] if news_analysis else None
+                },
+                'price_analysis': {
+                    'timestamp': price_analysis[0] if price_analysis else None,
+                    'current_price': price_analysis[1] if price_analysis else None,
+                    'analysis': price_analysis[2] if price_analysis else None
+                },
+                'final_decision': {
+                    'timestamp': final_decision[0] if final_decision else None,
+                    'current_price': final_decision[1] if final_decision else None,
+                    'analysis': final_decision[2] if final_decision else None
+                }
             }
-        return None
-    
-    def get_latest_analysis(self):
-        """최신 거래 분석 조회"""
-        conn = sqlite3.connect(self.db_name)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT timestamp, current_price, decision, investment_ratio, reason
-            FROM trading_analysis
-            ORDER BY timestamp DESC
-            LIMIT 1
-        ''')
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            return {
-                'timestamp': result[0],
-                'price': result[1],
-                'decision': result[2],
-                'investment_ratio': result[3],
-                'reason': result[4]
-            }
-        return None
