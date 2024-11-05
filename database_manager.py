@@ -8,6 +8,10 @@ class DatabaseManager:
         """데이터베이스 매니저 초기화"""
         self.db_path = db_path
         self._create_tables()
+
+    def get_connection(self):
+        """데이터베이스 연결을 반환합니다."""
+        return sqlite3.connect(self.db_path)
     
     def _create_tables(self):
         """필요한 테이블들을 생성합니다."""
