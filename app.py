@@ -3,6 +3,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 from database_manager import DatabaseManager
+import pandas as pd
 
 def create_price_chart(market_df, analysis_df):
     """가격 차트 생성 (매수/매도 포인트 포함)"""
@@ -35,7 +36,7 @@ def create_price_chart(market_df, analysis_df):
     )
 
     # 매수/매도 포인트 추가
-    if not analysis_df.empty:
+    if not analysis_df.empty and hasattr(analysis_df, 'decision'):
         # 분석 데이터도 차트에 표시된 기간에 맞추기
         min_time = market_df['timestamp'].min()
         max_time = market_df['timestamp'].max()
@@ -122,6 +123,48 @@ def create_price_chart(market_df, analysis_df):
 
     return fig
 
+def display_analysis_results(latest_analysis, all_analysis):
+    """분석 결과를 표시하는 함수"""
+    # 최신 전체 분석 결과 표시
+    if latest_analysis:
+        st.header("Latest Analysis Results")
+        
+        # 탭 생성
+        tabs = st.tabs(["Final Decision", "Price Analysis", "News Analysis"])
+        
+        # Final Decision 탭
+        with tabs[0]:
+            st.markdown("### Final Trading Decision")
+            st.markdown(f"**Timestamp:** {latest_analysis['final_timestamp']}")
+            st.markdown(f"**Current Price:** ₩{latest_analysis['current_price']:,}")
+            st.text_area("Analysis", latest_analysis['final_decision'], 
+                        height=300, key="final_decision")
+        
+        # Price Analysis 탭
+        with tabs[1]:
+            st.markdown("### Technical Analysis")
+            st.markdown(f"**Timestamp:** {latest_analysis['price_timestamp']}")
+            st.text_area("Analysis", latest_analysis['price_analysis'], 
+                        height=300, key="price_analysis")
+        
+        # News Analysis 탭
+        with tabs[2]:
+            st.markdown("### News Analysis")
+            st.markdown(f"**Timestamp:** {latest_analysis['news_timestamp']}")
+            st.text_area("Analysis", latest_analysis['news_analysis'], 
+                        height=300, key="news_analysis")
+    
+    # 전체 분석 이력 표시
+    st.header("Analysis History")
+    for _, row in all_analysis.iterrows():
+        with st.expander(
+            f"{row['analysis_type'].upper()} Analysis - {row['timestamp']}"
+        ):
+            if row['current_price']:
+                st.markdown(f"**Current Price:** ₩{row['current_price']:,}")
+            st.text_area("Analysis", row['analysis_text'], 
+                        height=200, key=f"{row['timestamp']}_{row['analysis_type']}")
+
 def main():
     st.set_page_config(page_title='Bithumb Trading Monitor', 
                       layout='wide',
@@ -132,6 +175,19 @@ def main():
         .stApp {
             background-color: #1e1e1e;
             color: white;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 20px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 50px;
+            white-space: pre-wrap;
+            background-color: #2d2d2d;
+            border-radius: 4px;
+            padding: 10px;
+        }
+        .stTabs [aria-selected="true"] {
+            background-color: #0e84b5;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -146,46 +202,19 @@ def main():
     hours = st.sidebar.slider('Data Range (hours)', 1, 72, 24)
     refresh_interval = st.sidebar.slider('Refresh Interval (seconds)', 5, 60, 10)
 
-    # 최신 분석 결과 표시
-    latest_analysis = db.get_latest_analysis()
-    if latest_analysis:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric(
-                "Trading Decision", 
-                latest_analysis['decision'],
-                f"{latest_analysis['investment_ratio']}%"
-            )
-        with col2:
-            st.metric(
-                "Current Price",
-                f"₩{latest_analysis['price']:,.0f}"
-            )
-        with col3:
-            st.metric(
-                "Last Updated",
-                datetime.strptime(latest_analysis['timestamp'], 
-                                '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
-            )
-
-        st.info(f"분석 근거: {latest_analysis['reason']}")
-
-    # 차트 데이터 로드
+    # 데이터 로드
+    latest_analysis = db.get_latest_full_analysis()
+    all_analysis = db.get_all_analysis_results(hours=hours)
     market_df = db.get_market_data(hours=hours)
     analysis_df = db.get_analysis_data(hours=hours)
 
+    # 차트 표시
     if not market_df.empty:
         fig = create_price_chart(market_df, analysis_df)
         st.plotly_chart(fig, use_container_width=True)
 
-        # 거래 분석 이력 (최근 20개만 표시)
-        if not analysis_df.empty:
-            st.subheader('Trading Analysis History')
-            display_df = analysis_df[['timestamp', 'current_price', 'decision', 
-                                    'investment_ratio', 'reason']].sort_values('timestamp', ascending=False).head(20)
-            st.dataframe(display_df, use_container_width=True)
-    else:
-        st.warning('No data available in the database. Please make sure the trading bot is running.')
+    # 분석 결과 표시
+    display_analysis_results(latest_analysis, all_analysis)
 
     # 자동 새로고침
     st.markdown(f"""

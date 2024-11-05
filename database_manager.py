@@ -2,6 +2,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional
+import pandas as pd
 
 class DatabaseManager:
     def __init__(self, db_path: str = "crypto_analysis.db"):
@@ -200,3 +201,90 @@ class DatabaseManager:
                     'analysis': final_decision[2] if final_decision else None
                 }
             }
+    def get_latest_full_analysis(self):
+        """가장 최근의 전체 분석 결과를 가져옵니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            query = """
+            SELECT 
+                n.timestamp as news_timestamp,
+                n.analysis_text as news_analysis,
+                p.timestamp as price_timestamp,
+                p.analysis_text as price_analysis,
+                p.current_price,
+                f.timestamp as final_timestamp,
+                f.analysis_text as final_decision
+            FROM news_analysis n
+            JOIN price_analysis p ON date(n.timestamp) = date(p.timestamp)
+            JOIN final_decision f ON date(p.timestamp) = date(f.timestamp)
+            WHERE n.timestamp >= datetime('now', '-24 hours')
+            ORDER BY n.timestamp DESC
+            LIMIT 1;
+            """
+            
+            cursor.execute(query)
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'news_timestamp': result[0],
+                    'news_analysis': result[1],
+                    'price_timestamp': result[2],
+                    'price_analysis': result[3],
+                    'current_price': result[4],
+                    'final_timestamp': result[5],
+                    'final_decision': result[6]
+                }
+            return None
+
+    def get_all_analysis_results(self, hours=24):
+        """모든 분석 결과(뉴스, 가격, 최종 결정)를 가져옵니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            query = f"""
+            SELECT 
+                'news' as analysis_type,
+                timestamp,
+                analysis_text,
+                NULL as current_price
+            FROM news_analysis 
+            WHERE timestamp >= datetime('now', '-{hours} hours')
+            UNION ALL
+            SELECT 
+                'price' as analysis_type,
+                timestamp,
+                analysis_text,
+                current_price
+            FROM price_analysis
+            WHERE timestamp >= datetime('now', '-{hours} hours')
+            UNION ALL
+            SELECT 
+                'final' as analysis_type,
+                timestamp,
+                analysis_text,
+                current_price
+            FROM final_decision
+            WHERE timestamp >= datetime('now', '-{hours} hours')
+            ORDER BY timestamp DESC;
+            """
+            
+            return pd.read_sql_query(query, conn)
+    def get_analysis_data(self, hours=24):
+        """최근 분석 결과와 투자 결정을 가져옵니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            query = """
+            SELECT 
+                timestamp,
+                current_price,
+                analysis_text as decision,
+                NULL as investment_ratio
+            FROM final_decision
+            WHERE timestamp >= datetime('now', ?) 
+            ORDER BY timestamp DESC
+            """
+            df = pd.read_sql_query(query, conn, params=(f'-{hours} hours',))
+            
+            # 분석 텍스트에서 투자 비중 추출 (예: "투자 비중: 50%")
+            df['investment_ratio'] = df['decision'].str.extract(r'투자\s*비중[:\s]*(\d+)').astype(float)
+            
+            return df
