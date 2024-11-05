@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from database_manager import DatabaseManager
 from price_collector import BithumbTrader
 from news_collector import NaverNewsCollector  # 새로 추가
+import time
 
 # 환경 변수 및 LangSmith 설정
 load_dotenv()
@@ -328,6 +329,35 @@ def run_trading_analysis():
     except Exception as e:
         print(f"분석 실행 중 오류 발생: {e}")
         raise e
+    
+def run_continuous_analysis():
+    """1분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
+    print("연속 트레이딩 분석 시작...")
+    print("Ctrl+C를 눌러서 프로그램을 종료할 수 있습니다.")
+    
+    while True:
+        try:
+            # 현재 시간 출력
+            current_time = datetime.now()
+            print(f"\n{'='*50}")
+            print(f"새로운 분석 시작 시간: {current_time}")
+            print(f"{'='*50}\n")
+            
+            # 트레이딩 분석 실행
+            run_trading_analysis()
+            
+            # 다음 실행까지 대기
+            print(f"\n다음 분석까지 대기 중...")
+            time.sleep(60)  # 60초(1분) 대기
+            
+        except KeyboardInterrupt:
+            print("\n프로그램이 사용자에 의해 종료되었습니다.")
+            break
+        except Exception as e:
+            print(f"예기치 않은 오류 발생: {e}")
+            print("60초 후 다시 시도합니다...")
+            time.sleep(60)
 
 if __name__ == "__main__":
-    run_trading_analysis()
+    # 단일 실행 대신 연속 실행 함수를 호출
+    run_continuous_analysis()
