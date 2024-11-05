@@ -12,7 +12,7 @@ import langsmith
 from dotenv import load_dotenv
 from database_manager import DatabaseManager
 from price_collector import BithumbTrader
-from news_collector import NaverNewsCollector  # 새로 추가
+from news_collector import NaverNewsCollector
 import time
 
 # 환경 변수 및 LangSmith 설정
@@ -34,13 +34,9 @@ db_manager = DatabaseManager()
 trader = BithumbTrader()
 langsmith_client = Client()
 
-_cached_market_data = None
-_last_update_time = None
-
 def collect_latest_news():
     """최신 뉴스를 수집하고 저장"""
     try:
-        # 함수 내부에서 collector 인스턴스 생성
         local_news_collector = NaverNewsCollector()
         total_saved = 0
         
@@ -57,29 +53,19 @@ def collect_latest_news():
         print(f"뉴스 수집 중 오류 발생: {e}")
 
 def get_market_data_once(state: AgentState) -> dict:
-    """시장 데이터를 한 번만 수집하여 state에 저장"""
-    global _cached_market_data, _last_update_time
-    
-    if 'market_data' not in state:
-        try:
-            current_time = datetime.now()
-            if (_cached_market_data is None or 
-                _last_update_time is None or 
-                (current_time - _last_update_time).seconds > 60):
-                
-                if not trader.analyzer.data_queue.empty():
-                    market_data = trader.analyzer.data_queue.get()
-                else:
-                    market_data = trader.collect_market_data()
-                
-                _cached_market_data = market_data
-                _last_update_time = current_time
-            
-            state['market_data'] = _cached_market_data
-            
-        except Exception as e:
-            print(f"시장 데이터 수집 중 오류 발생: {e}")
-            state['market_data'] = None
+    """시장 데이터를 매번 새로 수집하여 state에 저장"""
+    try:
+        # 항상 새로운 데이터를 수집
+        if not trader.analyzer.data_queue.empty():
+            market_data = trader.analyzer.data_queue.get()
+        else:
+            market_data = trader.collect_market_data()
+        
+        state['market_data'] = market_data
+        
+    except Exception as e:
+        print(f"시장 데이터 수집 중 오류 발생: {e}")
+        state['market_data'] = None
     
     return state['market_data']
 
@@ -94,7 +80,8 @@ def get_recent_news(dummy: str = "") -> str:
         # 최신 뉴스 수집을 먼저 실행
         collect_latest_news()
         
-        news_df = db_manager.get_recent_news(hours=24)
+        news_df = db_manager.get_recent_news_limit()
+        print(news_df)
         if news_df.empty:
             return "최근 뉴스가 없습니다."
         
@@ -225,7 +212,7 @@ def final_decision_agent(state: AgentState) -> AgentState:
         tags=["final", "decision"]
     ):
         llm = ChatOpenAI(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             temperature=0.7,
             api_key=os.getenv('OPENAI_API_KEY')
         )

@@ -144,6 +144,17 @@ class DatabaseManager:
                 ORDER BY pub_date DESC
             """
             return pd.read_sql_query(query, conn, params=(f'-{hours} hours',))
+        
+    def get_recent_news_limit(self, limit: int = 50) -> pd.DataFrame:
+        """최근 뉴스를 limit 개수만큼 가져옵니다."""
+        with sqlite3.connect(self.db_path) as conn:
+            query = """
+                SELECT title, description, pub_date
+                FROM news
+                ORDER BY pub_date DESC
+                LIMIT ?
+            """
+            return pd.read_sql_query(query, conn, params=(limit,))
     
     def get_market_data(self, hours: int = 24) -> pd.DataFrame:
         """최근 시장 데이터를 가져옵니다."""
