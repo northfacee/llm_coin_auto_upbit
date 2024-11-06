@@ -120,8 +120,8 @@ def collect_and_save_news():
                     ]
                 }
                 
-                with open("news_collection_log.jsonl", 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+                # with open("news_collection_log.jsonl", 'a', encoding='utf-8') as f:
+                #     f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
         
         print(f"\n총 {total_saved}개의 새로운 뉴스 기사가 저장되었습니다.")
             

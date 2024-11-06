@@ -75,6 +75,20 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # 거래 실행 결과 테이블 추가
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS trade_executions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TIMESTAMP NOT NULL,
+                    trade_type TEXT NOT NULL,
+                    quantity REAL NOT NULL,
+                    price REAL NOT NULL,
+                    total_amount REAL NOT NULL,
+                    order_id TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             conn.commit()
     
@@ -299,3 +313,30 @@ class DatabaseManager:
             df['investment_ratio'] = df['decision'].str.extract(r'투자\s*비중[:\s]*(\d+)').astype(float)
             
             return df
+
+    def save_trade_execution(self, timestamp, trade_type, quantity, price, total_amount, order_id):
+        """거래 실행 결과를 데이터베이스에 저장"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                query = """
+                    INSERT INTO trade_executions 
+                    (timestamp, trade_type, quantity, price, total_amount, order_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """
+                
+                cursor.execute(query, (
+                    timestamp,
+                    trade_type,
+                    quantity,
+                    price,
+                    total_amount,
+                    order_id
+                ))
+                
+                conn.commit()
+                print("거래 실행 결과가 성공적으로 저장되었습니다.")
+                
+        except Exception as e:
+            print(f"거래 실행 결과 저장 중 오류 발생: {e}")

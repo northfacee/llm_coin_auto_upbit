@@ -13,14 +13,21 @@ from dotenv import load_dotenv
 from database_manager import DatabaseManager
 from price_collector import BithumbTrader
 from news_collector import NaverNewsCollector
+from trading import BithumbTradeExecutor
 import time
 
 # 환경 변수 및 LangSmith 설정
 load_dotenv()
+try:
+    INVESTMENT = float(os.getenv('INVESTMENT'))
+except TypeError:
+    raise ValueError("INVESTMENT 환경변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
+
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
 os.environ["LANGCHAIN_PROJECT"] = "crypto-trading-analysis"
+
 
 # 상태 타입 정의
 class AgentState(TypedDict):
@@ -32,6 +39,7 @@ class AgentState(TypedDict):
 # 글로벌 인스턴스 초기화
 db_manager = DatabaseManager()
 trader = BithumbTrader()
+trade_executor = BithumbTradeExecutor()
 langsmith_client = Client()
 
 def collect_latest_news():
@@ -81,7 +89,7 @@ def get_recent_news(dummy: str = "") -> str:
         collect_latest_news()
         
         news_df = db_manager.get_recent_news_limit()
-        print(news_df)
+        #print(news_df)
         if news_df.empty:
             return "최근 뉴스가 없습니다."
         
@@ -222,6 +230,7 @@ def final_decision_agent(state: AgentState) -> AgentState:
         
         prompt = f"""당신은 암호화폐 투자 최고 결정권자입니다.
         뉴스 분석과 기술적 분석 결과를 종합하여 최종 투자 결정을 내려주세요.
+        결정을 내릴때 뉴스 7, 가격 3의 비율로 생각해서 결정해주세요. 즉, 뉴스의 영향력이 더 큽니다.
         
         뉴스 분석 결과:
         {state['results']['news_analysis']['analysis']}
@@ -260,6 +269,95 @@ def final_decision_agent(state: AgentState) -> AgentState:
         
         return state
 
+def execute_trading_decision(state: AgentState) -> None:
+    try:
+        if 'final_decision' not in state['results']:
+            print("최종 결정이 없어 거래를 실행할 수 없습니다.")
+            return
+        
+        final_decision = state['results']['final_decision']
+        current_price = float(state['market_data']['current_price']['closing_price'])
+        timestamp = datetime.now()
+        
+        # 최종 결정 텍스트에서 거래 유형 파싱
+        decision_text = final_decision['decision'].lower()
+        
+        # 관망 결정인 경우
+        if "관망" in decision_text:
+            print("\n=== 거래 실행 결과 ===")
+            print("관망 결정으로 인해 거래를 실행하지 않습니다.")
+            
+            hold_order_id = f"HOLD_{timestamp.strftime('%Y%m%d%H%M%S')}"
+            db_manager.save_trade_execution(
+                timestamp=timestamp,
+                trade_type="HOLD",  # 순수한 관망 결정
+                quantity=0,
+                price=current_price,
+                total_amount=0,
+                order_id=hold_order_id
+            )
+            return
+
+        # 매수 결정일 때 잔액 확인
+        if "매수" in decision_text:
+            try:
+                # Bithumb API로부터 잔액 정보 가져오기
+                trade_executor = BithumbTradeExecutor()
+                balance_info = trade_executor.get_balance()  # 잔액 조회 메서드 필요
+                available_krw = float(balance_info.get('available_krw', 0))
+                
+                # 잔액이 만원 미만이면 BUY_CANT로 처리
+                if available_krw < 10000:
+                    print("\n=== 거래 실행 결과 ===")
+                    print(f"잔액({available_krw:,.0f}원)이 만원 미만이라 매수할 수 없습니다.")
+                    
+                    buy_cant_order_id = f"BUY_CANT_{timestamp.strftime('%Y%m%d%H%M%S')}"
+                    db_manager.save_trade_execution(
+                        timestamp=timestamp,
+                        trade_type="CANT_BUY",  # 잔액 부족으로 매수 불가
+                        quantity=0,
+                        price=current_price,
+                        total_amount=0,
+                        order_id=buy_cant_order_id
+                    )
+                    return
+                    
+            except Exception as e:
+                print(f"잔액 확인 중 오류 발생: {e}")
+                return
+
+        # 거래 실행기 초기화 (이미 초기화되어 있지 않은 경우)
+        try:
+            if not trade_executor:
+                trade_executor = BithumbTradeExecutor()
+        except ValueError as ve:
+            print(f"거래 실행기 초기화 실패: {ve}")
+            return
+
+        # 거래 실행
+        result = trade_executor.execute_trade(
+            decision=final_decision,
+            max_investment=INVESTMENT,
+            current_price=current_price
+        )
+        
+        # 거래 결과 출력 및 저장
+        print("\n=== 거래 실행 결과 ===")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        
+        # 거래 결과를 데이터베이스에 저장 (성공한 경우에만)
+        if result['status'] == 'SUCCESS':
+            db_manager.save_trade_execution(
+                timestamp=timestamp,
+                trade_type=result['type'],
+                quantity=result['quantity'],
+                price=result['price'],
+                total_amount=result['total_amount'],
+                order_id=result['order_id']
+            )
+    except Exception as e:
+        print(f"거래 실행 중 오류 발생: {e}")
+
 def create_trading_workflow() -> Graph:
     """트레이딩 워크플로우 생성"""
     workflow = StateGraph(AgentState)
@@ -287,7 +385,8 @@ def run_trading_analysis():
         config = {
             "messages": [], 
             "next_step": "news_analysis",
-            "results": {}
+            "results": {},
+            "market_data": {}
         }
         
         with langsmith.trace(
@@ -310,16 +409,23 @@ def run_trading_analysis():
                 if 'final_decision' in result['results']:
                     print("\n[최종 결정]")
                     print(result['results']['final_decision']['decision'])
+                    
+                    # 거래 실행 추가
+                    execute_trading_decision(result)
             else:
                 print("분석 결과가 없습니다.")
         
     except Exception as e:
         print(f"분석 실행 중 오류 발생: {e}")
         raise e
-    
+
 def run_continuous_analysis():
-    """1분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
+    """30분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
+    WAIT_MINUTES = 20
+    WAIT_SECONDS = WAIT_MINUTES * 60  # 30분을 초로 변환
+    
     print("연속 트레이딩 분석 시작...")
+    print(f"실행 간격: {WAIT_MINUTES}분")
     print("Ctrl+C를 눌러서 프로그램을 종료할 수 있습니다.")
     
     while True:
@@ -334,16 +440,20 @@ def run_continuous_analysis():
             run_trading_analysis()
             
             # 다음 실행까지 대기
-            print(f"\n다음 분석까지 대기 중...")
-            time.sleep(60)  # 60초(1분) 대기
+            next_run_time = current_time + timedelta(minutes=WAIT_MINUTES)
+            print(f"\n다음 분석 예정 시간: {next_run_time}")
+            print(f"다음 분석까지 {WAIT_MINUTES}분 대기 중...")
+            
+            # 지정된 시간만큼 대기
+            time.sleep(WAIT_SECONDS)
             
         except KeyboardInterrupt:
             print("\n프로그램이 사용자에 의해 종료되었습니다.")
             break
         except Exception as e:
             print(f"예기치 않은 오류 발생: {e}")
-            print("60초 후 다시 시도합니다...")
-            time.sleep(60)
+            print(f"{WAIT_MINUTES}분 후 다시 시도합니다...")
+            time.sleep(WAIT_SECONDS)
 
 if __name__ == "__main__":
     # 단일 실행 대신 연속 실행 함수를 호출
