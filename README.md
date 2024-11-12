@@ -13,7 +13,7 @@
 
 1. 저장소 클론
 ```bash
-git clone https://github.com/your-username/test.git
+git clone https://github.com/northfacee/test.git
 cd crypto-trading-bot
 ```
 
@@ -33,8 +33,15 @@ pip install -r requirements.txt
 ```
 OPENAI_API_KEY=your_openai_api_key
 LANGSMITH_API_KEY=your_langsmith_api_key
-NAVER_CLIENT_ID=
-NAVER_CLIENT_SECRET=
+
+NAVER_CLIENT_ID=your_naver_api_key
+NAVER_CLIENT_SECRET=your_naver_api_secret_key
+
+BITHUMB_API_KEY=your_bithumb_api_key
+BITHUMB_API_SECRET=your_bithumb_api_secret_key
+
+INVESTMENT= your_input_money
+
 
 
 ```
@@ -42,14 +49,14 @@ NAVER_CLIENT_SECRET=
 ## 실행 방법
 
 ```bash
-python run_trading_analysis.py
+python decision.py
+streamlit run app.py
 ```
 
 ## 주의사항
 
 - 이 봇은 교육 및 연구 목적으로 제작되었습니다.
-- 실제 트레이딩에 사용할 경우 발생하는 손실에 대해 책임지지 않습니다.
-- API 키와 같은 민감한 정보는 절대로 GitHub에 커밋하지 마세요.
+- 실제 트레이딩에 사용할 경우 발생하는 손실에 대해 절대 책임지지 않습니다.
 
 ## 라이선스
 
