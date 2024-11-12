@@ -5,16 +5,24 @@
 ## 기능
 
 - 실시간 비트코인 시장 데이터 수집
-- LangChain과 GPT-4를 활용한 시장 분석
 - LangSmith를 통한 분석 결과 모니터링
-- 데이터베이스 저장 및 로깅
+- Langgraph를 통한 에이전트 (뉴스 에이전트, 가격 에이전트)
+- Streamlit을 통해 매매 모니터링 가능
+
+## 매매과정
+
+1. 크게 뉴스 에이전트, 가격 에이전트, 최종 에이전트 3개가 있습니다.
+2. 뉴스 에이전트의 경우 네이버 api를 사용하여 search_keywords에 키워드들을 넣으면 그 키워드의 뉴스들을 수집하여 이 정보를 토대로 결정합니다.
+3. 가격 에이전트의 경우 5m, 10m, 30m, 60m, 240m, 24h의 데이터들을 다양한 지표로 변환하여 이 정보를 토대로 결정합니다.
+4. 최종 에이전트는 뉴스, 가격 에이전트의 정보를 종합적으로 판단하여 결정합니다.
+5. 매매내역은 Streamlit을 통해 모니터링 가능합니다.
 
 ## 설치 방법
 
 1. 저장소 클론
 ```bash
 git clone https://github.com/northfacee/test.git
-cd crypto-trading-bot
+cd test
 ```
 
 2. 가상환경 생성 및 활성화
@@ -40,10 +48,7 @@ NAVER_CLIENT_SECRET=your_naver_api_secret_key
 BITHUMB_API_KEY=your_bithumb_api_key
 BITHUMB_API_SECRET=your_bithumb_api_secret_key
 
-INVESTMENT= your_input_money
-
-
-
+INVESTMENT= your_initial_money #예시 1000000
 ```
 
 ## 실행 방법
@@ -56,8 +61,10 @@ streamlit run app.py
 ## 주의사항
 
 - 이 봇은 교육 및 연구 목적으로 제작되었습니다.
-- 실제 트레이딩에 사용할 경우 발생하는 손실에 대해 절대 책임지지 않습니다.
+- 실제 트레이딩에 사용할 경우 발생하는 수익,손실에 대해 절대 절대 책임지지 않습니다.
+- 계속 실행하기 위해서는 클라우드 서비스를 사용하는게 좋습니다.
 
-## 라이선스
+## 추후 추가 사항
 
-MIT License
+- 현재는 비트코인만 매매하지만, 상위 거래량으로 순위를 매겨 다양한 코인 자동매매 가능성
+- 나스닥, 공포지수 등도 포함하여 분석
