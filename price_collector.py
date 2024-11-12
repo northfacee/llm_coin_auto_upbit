@@ -8,71 +8,36 @@ import requests
 import time
 from datetime import datetime
 from dotenv import load_dotenv
+from technical_indicator import TechnicalIndicators
 
 class MarketDataAnalyzer:
     def __init__(self):
         self.data_queue = Queue()
-    
-    @staticmethod
-    def calculate_moving_averages(prices: np.array, periods: List[int]) -> Dict[int, float]:
-        """여러 기간의 이동평균 계산"""
-        mas = {}
-        for period in periods:
-            if len(prices) >= period:
-                mas[period] = np.mean(prices[-period:])
-        return mas
+        self.indicators = TechnicalIndicators()
 
-    @staticmethod
-    def calculate_rsi(prices: np.array, period: int = 14) -> float:
-        """RSI 계산"""
-        deltas = np.diff(prices)
-        gain = np.where(deltas > 0, deltas, 0)
-        loss = np.where(deltas < 0, -deltas, 0)
-        
-        avg_gain = np.mean(gain[:period])
-        avg_loss = np.mean(loss[:period])
-        
-        if avg_loss == 0:
-            return 100
-        
-        rs = avg_gain / avg_loss
-        return 100 - (100 / (1 + rs))
-
-    @staticmethod
-    def calculate_stochastic(high: np.array, low: np.array, close: np.array, 
-                           k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
-        """Stochastic Oscillator 계산"""
-        lowest_low = np.min(low[-k_period:])
-        highest_high = np.max(high[-k_period:])
-        
-        if highest_high - lowest_low == 0:
-            return 50, 50
-        
-        k = 100 * (close[-1] - lowest_low) / (highest_high - lowest_low)
-        d = np.mean([k])  # 실제로는 이전 값들도 필요
-        return k, d
-
-    @staticmethod
-    def calculate_macd(prices: np.array, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[float, float, float]:
-        """MACD 계산"""
-        ema_fast = np.mean(prices[-fast:])  # 간단화를 위해 SMA 사용
-        ema_slow = np.mean(prices[-slow:])
-        macd_line = ema_fast - ema_slow
-        signal_line = np.mean([macd_line])  # 실제로는 이전 값들도 필요
-        histogram = macd_line - signal_line
-        return macd_line, signal_line, histogram
-
-    @staticmethod
-    def calculate_bollinger_bands(prices: np.array, period: int = 20, num_std: float = 2) -> Tuple[float, float, float]:
-        """볼린저 밴드 계산"""
-        if len(prices) < period:
-            return None, None, None
-        
-        sma = np.mean(prices[-period:])
-        std = np.std(prices[-period:])
-        upper_band = sma + (std * num_std)
-        lower_band = sma - (std * num_std)
-        return upper_band, sma, lower_band
+    def analyze_market_data(self, prices: np.array, high: np.array, low: np.array, 
+                          close: np.array, volume: np.array) -> Dict:
+        """모든 기술적 지표 계산"""
+        return {
+            'moving_averages': self.indicators.calculate_moving_averages(prices, [5, 10, 20, 50, 200]),
+            'ema': {
+                '12': self.indicators.calculate_ema(prices, 12),
+                '26': self.indicators.calculate_ema(prices, 26)
+            },
+            'wma': {
+                '20': self.indicators.calculate_wma(prices, 20)
+            },
+            'rsi': self.indicators.calculate_rsi(prices),
+            'bollinger_bands': self.indicators.calculate_bollinger_bands(prices),
+            'stochastic': self.indicators.calculate_stochastic(high, low, close),
+            'dmi': self.indicators.calculate_dmi(high, low, close),
+            'atr': self.indicators.calculate_atr(high, low, close),
+            'obv': self.indicators.calculate_obv(close, volume),
+            'vwap': self.indicators.calculate_vwap(high, low, close, volume),
+            'mfi': self.indicators.calculate_mfi(high, low, close, volume),
+            'williams_r': self.indicators.calculate_williams_r(high, low, close),
+            'cci': self.indicators.calculate_cci(high, low, close)
+        }
 
 class BithumbTrader:
     def __init__(self):
@@ -81,45 +46,25 @@ class BithumbTrader:
         self.headers = {"accept": "application/json"}
         self.analyzer = MarketDataAnalyzer()
 
-    def get_transaction_history(self, symbol: str) -> Optional[List[Dict]]:
-        """최근 체결 내역 조회"""
-        try:
-            url = f"{self.base_url}/public/transaction_history/{symbol}_KRW"
-            print(f"요청 URL: {url}")
+    # def get_transaction_history(self, symbol: str) -> Optional[List[Dict]]:
+    #     """최근 체결 내역 조회"""
+    #     try:
+    #         url = f"{self.base_url}/public/transaction_history/{symbol}_KRW"
+    #         print(f"요청 URL: {url}")
             
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            data = response.json()
+    #         response = requests.get(url, headers=self.headers)
+    #         response.raise_for_status()
+    #         data = response.json()
             
-            if data['status'] != '0000':
-                print(f"API 에러: {data.get('message', '알 수 없는 에러')}")
-                return None
+    #         if data['status'] != '0000':
+    #             print(f"API 에러: {data.get('message', '알 수 없는 에러')}")
+    #             return None
             
-            return data['data']
+    #         return data['data']
             
-        except Exception as e:
-            print(f"체결 내역 조회 실패: {e}")
-            return None
-
-    def get_orderbook(self, symbol: str) -> Optional[Dict]:
-        """호가 정보 조회"""
-        try:
-            url = f"{self.base_url}/public/orderbook/{symbol}_KRW"
-            print(f"요청 URL: {url}")
-            
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data['status'] != '0000':
-                print(f"API 에러: {data.get('message', '알 수 없는 에러')}")
-                return None
-            
-            return data['data']
-            
-        except Exception as e:
-            print(f"호가 데이터 조회 실패: {e}")
-            return None
+    #     except Exception as e:
+    #         print(f"체결 내역 조회 실패: {e}")
+    #         return None
 
     def get_current_price(self, symbol: str = "BTC") -> Optional[Dict]:
         """현재가 정보 조회"""
@@ -139,130 +84,130 @@ class BithumbTrader:
         except Exception as e:
             print(f"현재가 조회 실패: {e}")
             return None
-        
-    def get_candlestick_data(self, symbol: str, interval: str) -> Optional[List[Dict]]:
-        """캔들스틱 데이터 조회"""
+
+    def get_minute_candles(self, market: str, unit: int, count: int = 200) -> Optional[List[Dict]]:
+        """분봉 데이터 조회 (v2 API)"""
         try:
-            # 시간 간격에 따른 엔드포인트 선택 (1h 제거)
-            if interval == '30m':
-                url = f"{self.base_url}/public/candlestick/{symbol}_KRW/30m"
-            elif interval == '24h':
-                url = f"{self.base_url}/public/candlestick/{symbol}_KRW/24h"
-            else:
-                raise ValueError(f"지원하지 않는 시간 간격: {interval}")
+            url = f"{self.base_url}/v1/candles/minutes/{unit}"
+            params = {
+                "market": f"KRW-{market}",
+                "count": count
+            }
             
             print(f"요청 URL: {url}")
-            
-            response = requests.get(url, headers=self.headers)
+            response = requests.get(url, params=params, headers=self.headers)
             response.raise_for_status()
             data = response.json()
             
-            if data['status'] != '0000':
-                print(f"API 에러: {data.get('message', '알 수 없는 에러')}")
-                return None
-            
-            return data['data']
+            return data
             
         except Exception as e:
-            print(f"캔들스틱 데이터 조회 실패: {e}")
+            print(f"{unit}분봉 데이터 조회 실패: {e}")
             return None
 
-    def collect_market_data(self, market: str = "BTC_KRW") -> Dict:
-        """시장 데이터 수집 및 분석"""
+    def get_daily_candles(self, market: str, count: int = 200) -> Optional[List[Dict]]:
+        """일봉 데이터 조회 (v2 API)"""
         try:
-            symbol = market.split('_')[0]
-            
-            # 현재가 정보 조회
-            current_price_data = self.get_current_price(symbol)
-            if current_price_data:
-                print(f"현재가: {current_price_data['closing_price']} KRW")
-            
-            # 캔들스틱 데이터 수집 (30m, 24h만)
-            candle_data = {}
-            for interval in ['30m', '24h']:
-                data = self.get_candlestick_data(symbol, interval)
-                if data:
-                    print(f"{interval} 캔들스틱 데이터 수집 완료")
-                    candle_data[interval] = data
-            
-            # 호가 데이터 수집
-            orderbook = self.get_orderbook(symbol)
-            if orderbook:
-                print("호가 데이터 수집 완료")
-            
-            # 최근 체결 내역 수집
-            transactions = self.get_transaction_history(symbol)
-            if transactions:
-                print("체결 내역 수집 완료")
-            
-            # 데이터 분석
-            analysis_results = {}
-            for interval, data in candle_data.items():
-                try:
-                    if data and len(data) > 0:
-                        # 숫자 변환 시 쉼표 제거 및 예외 처리
-                        def safe_float(value):
-                            if isinstance(value, str):
-                                return float(value.replace(',', ''))
-                            return float(value)
-
-                        prices = np.array([safe_float(candle[2]) for candle in data])  # 종가
-                        highs = np.array([safe_float(candle[3]) for candle in data])   # 고가
-                        lows = np.array([safe_float(candle[4]) for candle in data])    # 저가
-                        
-                        analysis_results[interval] = {
-                            'moving_averages': self.analyzer.calculate_moving_averages(prices, [5, 10, 20, 50, 200]),
-                            'rsi': self.analyzer.calculate_rsi(prices),
-                            'stochastic': self.analyzer.calculate_stochastic(highs, lows, prices),
-                            'macd': self.analyzer.calculate_macd(prices),
-                            'bollinger_bands': self.analyzer.calculate_bollinger_bands(prices),
-                            'ohlcv': data[-1]
-                        }
-                        print(f"{interval} 기술적 분석 완료")
-                except Exception as e:
-                    print(f"{interval} 데이터 분석 중 오류 발생: {e}")
-                    print(f"데이터 샘플: {data[0] if data else 'No data'}")
-            
-            # 최종 데이터 구조화
-            market_data = {
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'market': market,
-                'current_price': current_price_data,
-                'analysis': analysis_results,
-                'orderbook': orderbook,
-                'transactions': transactions
+            url = f"{self.base_url}/v1/candles/days"
+            params = {
+                "market": f"KRW-{market}",
+                "count": count
             }
             
-            # 분석용 큐에 데이터 추가
-            self.analyzer.data_queue.put(market_data)
-            return market_data
+            print(f"요청 URL: {url}")
+            response = requests.get(url, params=params, headers=self.headers)
+            response.raise_for_status()
+            data = response.json()
+            
+            return data
             
         except Exception as e:
-            print(f"시장 데이터 수집 중 오류 발생: {e}")
-            print(f"상세 에러: {str(e)}")
+            print(f"일봉 데이터 조회 실패: {e}")
             return None
+        
+    def calculate_price_change_rate(self, current_price: float, comparison_price: float) -> float:
+        """특정 시점 가격 대비 현재 가격의 변동률 계산"""
+        if comparison_price == 0:
+            return 0.0
+        return ((current_price - comparison_price) / comparison_price) * 100
 
-    def run_trading_bot(self, market: str = "BTC_KRW", interval: int = 60):
+# price_collector.py의 run_trading_bot 메서드 부분 수정
+
+    def run_trading_bot(self, market: str = "BTC", interval: int = 60):
         """데이터 수집 봇 실행"""
-        print(f"데이터 수집 봇 시작 - {market}")
+        print(f"데이터 수집 및 시작 - {market}")
         print(f"수집 간격: {interval}초")
         
         while True:
             try:
                 market_data = self.collect_market_data(market)
-                if market_data and 'current_price' in market_data:
+                if market_data:
                     print(f"\n{market_data['timestamp']} - 데이터 수집 및 분석 완료")
-                    print(f"현재가: {float(market_data['current_price']['closing_price']):,.0f} KRW")
-                    print(f"24시간 변동률: {market_data['current_price']['fluctate_rate_24H']}%")
+                    print(f"현재가: {market_data['current_price']:,.0f} KRW")
                     
-                    # 기술적 지표 출력 (24시간 기준)
-                    if '24h' in market_data['analysis']:
-                        analysis = market_data['analysis']['24h']
-                        print(f"RSI(14): {analysis['rsi']:.2f}")
-                        print(f"MACD: {analysis['macd'][0]:.2f} / Signal: {analysis['macd'][1]:.2f}")
-                        bb = analysis['bollinger_bands']
-                        if all(x is not None for x in bb):
-                            print(f"볼린저 밴드: {bb[0]:,.0f} / {bb[1]:,.0f} / {bb[2]:,.0f}")
+                    # 변동률 출력
+                    print("\n각 시간대별 변동률:")
+                    for timeframe in ['5m', '10m', '30m', '60m', '240m', '24h']:
+                        if timeframe in market_data['analysis']:
+                            print(f"{timeframe}: {market_data['analysis'][timeframe]['change_rate']:.2f}%")
+                    
+                    # 기술적 지표 출력
+                    for timeframe in ['5m', '10m', '30m', '60m', '240m']:
+                        if timeframe in market_data['analysis']:
+                            analysis = market_data['analysis'][timeframe]
+                            print(f"\n{timeframe} 기술적 지표:")
+                            
+                            # 기존 지표들
+                            if 'rsi' in analysis:
+                                print(f"RSI(14): {analysis['rsi']:.2f}")
+                            
+                            if 'bollinger_bands' in analysis and all(x is not None for x in analysis['bollinger_bands']):
+                                bb = analysis['bollinger_bands']
+                                print(f"볼린저 밴드: {bb[0]:,.0f} / {bb[1]:,.0f} / {bb[2]:,.0f}")
+                            
+                            if 'moving_averages' in analysis:
+                                print("이동평균선:")
+                                for period, value in analysis['moving_averages'].items():
+                                    print(f"  MA{period}: {value:,.0f}")
+                            
+                            if 'stochastic' in analysis and all(x is not None for x in analysis['stochastic']):
+                                k, d = analysis['stochastic']
+                                print(f"Stochastic: %K={k:.2f}, %D={d:.2f}")
+                            
+                            if 'ema' in analysis:
+                                print("지수이동평균(EMA):")
+                                for period, value in analysis['ema'].items():
+                                    if value is not None:
+                                        print(f"  EMA{period}: {value:,.0f}")
+                            
+                            if 'wma' in analysis:
+                                print("가중이동평균(WMA):")
+                                for period, value in analysis['wma'].items():
+                                    if value is not None:
+                                        print(f"  WMA{period}: {value:,.0f}")
+                            
+                            # 추가 지표들 출력
+                            if 'dmi' in analysis and all(x is not None for x in analysis['dmi']):
+                                plus_di, minus_di, adx = analysis['dmi']
+                                print(f"DMI: +DI={plus_di:.2f}, -DI={minus_di:.2f}, ADX={adx:.2f}")
+                            
+                            if 'atr' in analysis:
+                                print(f"ATR: {analysis['atr']:,.0f}")
+                            
+                            if 'obv' in analysis:
+                                print(f"OBV: {analysis['obv']:,.0f}")
+                            
+                            if 'vwap' in analysis:
+                                print(f"VWAP: {analysis['vwap']:,.0f}")
+                            
+                            if 'mfi' in analysis:
+                                print(f"MFI: {analysis['mfi']:.2f}")
+                            
+                            if 'williams_r' in analysis:
+                                print(f"Williams %R: {analysis['williams_r']:.2f}")
+                            
+                            if 'cci' in analysis:
+                                print(f"CCI: {analysis['cci']:.2f}")
                 
                 time.sleep(interval)
                 
@@ -271,6 +216,96 @@ class BithumbTrader:
                 print("1분 후 재시도")
                 time.sleep(60)
 
+    def collect_market_data(self, market: str = "BTC") -> Dict:
+        try:
+            # 현재가 정보 조회
+            current_price_data = self.get_current_price(market)
+            if not current_price_data:
+                return None
+                
+            current_price = float(current_price_data['closing_price'])
+            print(f"현재가: {current_price:,.0f} KRW")
+            
+            # 캔들스틱 데이터 수집 및 변동률 계산
+            analysis_results = {}
+            
+            # 분봉 데이터 수집 (5분~240분)
+            for unit in [5, 10, 30, 60, 240]:
+                try:
+                    data = self.get_minute_candles(market, unit, count=200)
+                    
+                    if data and len(data) > 0:
+                        data = sorted(data, key=lambda x: x['timestamp'], reverse=True)
+                        
+                        now_price = float(data[0]['trade_price'])
+                        comparison_index = min(unit // 5, len(data) - 1)
+                        prev_price = float(data[comparison_index]['opening_price'])
+                        
+                        change_rate = ((now_price - prev_price) / prev_price) * 100
+                        
+                        if len(data) >= 200:
+                            # API 응답 키값에 맞게 수정
+                            prices_list = [float(candle['trade_price']) for candle in data[:200]]
+                            highs_list = [float(candle['high_price']) for candle in data[:200]]
+                            lows_list = [float(candle['low_price']) for candle in data[:200]]
+                            volumes_list = [float(candle['candle_acc_trade_volume']) for candle in data[:200]]
+                            
+                            prices = np.array(prices_list)
+                            highs = np.array(highs_list)
+                            lows = np.array(lows_list)
+                            volumes = np.array(volumes_list)
+                            
+                            analysis_results[f'{unit}m'] = {
+                                'moving_averages': self.analyzer.indicators.calculate_moving_averages(prices, [5, 10, 20, 50, 200]),
+                                'ema': {
+                                    '12': self.analyzer.indicators.calculate_ema(prices, 12),
+                                    '26': self.analyzer.indicators.calculate_ema(prices, 26)
+                                },
+                                'wma': {
+                                    '20': self.analyzer.indicators.calculate_wma(prices, 20)
+                                },
+                                'rsi': self.analyzer.indicators.calculate_rsi(prices),
+                                'stochastic': self.analyzer.indicators.calculate_stochastic(highs, lows, prices),
+                                'bollinger_bands': self.analyzer.indicators.calculate_bollinger_bands(prices),
+                                'dmi': self.analyzer.indicators.calculate_dmi(highs, lows, prices),
+                                'atr': self.analyzer.indicators.calculate_atr(highs, lows, prices),
+                                'obv': self.analyzer.indicators.calculate_obv(prices, volumes),
+                                'vwap': self.analyzer.indicators.calculate_vwap(highs, lows, prices, volumes),
+                                'mfi': self.analyzer.indicators.calculate_mfi(highs, lows, prices, volumes),
+                                'williams_r': self.analyzer.indicators.calculate_williams_r(highs, lows, prices),
+                                'cci': self.analyzer.indicators.calculate_cci(highs, lows, prices),
+                                'change_rate': change_rate
+                            }
+                        else:
+                            analysis_results[f'{unit}m'] = {
+                                'change_rate': change_rate
+                            }
+                        
+                except Exception as e:
+                    print(f"{unit}분봉 처리 중 오류 발생: {e}")
+                    analysis_results[f'{unit}m'] = {
+                        'change_rate': 0.0
+                    }
+            
+            # 24시간 데이터 추가
+            analysis_results['24h'] = {
+                'change_rate': float(current_price_data['fluctate_rate_24H'])
+            }
+            
+            # 최종 데이터 구조화
+            market_data = {
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'market': f"{market}_KRW",
+                'current_price': current_price,
+                'analysis': analysis_results
+            }
+            
+            return market_data
+            
+        except Exception as e:
+            print(f"시장 데이터 수집 중 오류 발생: {e}")
+            return None
+
 if __name__ == "__main__":
     trader = BithumbTrader()
-    trader.run_trading_bot(market="BTC_KRW", interval=30)
+    trader.run_trading_bot(market="BTC", interval=30)

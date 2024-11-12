@@ -80,7 +80,7 @@ def monitor_nasdaq(refresh_interval=60):
     except Exception as e:
         print(f"모니터링 중 오류 발생: {str(e)}")
 
-# 사용 예시
+# 사용 예시ㅎ
 if __name__ == "__main__":
     # 60초마다 갱신하여 모니터링
-    monitor_nasdaq(refresh_interval=10)
+    monitor_nasdaq(refresh_interval=60)

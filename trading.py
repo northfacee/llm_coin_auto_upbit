@@ -8,6 +8,8 @@ import time
 from decimal import Decimal, ROUND_DOWN
 import os
 from dotenv import load_dotenv
+import json
+import traceback
 
 class BithumbTradeExecutor:
     def __init__(self):
@@ -27,28 +29,50 @@ class BithumbTradeExecutor:
             'XRP': Decimal('1'),
         }
 
+    def get_balance(self) -> dict:
+        """계좌 잔고 조회"""
+        try:
+            params = {
+                'currency': self.symbol
+            }
+            response = self._send_request("/info/balance", params)
+            
+            if response.get('status') != '0000':
+                raise Exception(f"잔고 조회 실패: {response.get('message')}")
+            
+            data = response.get('data', {})
+            return {
+                'krw_available': Decimal(str(data.get('available_krw', '0'))),
+                'btc_available': Decimal(str(data.get('available_btc', '0'))),
+                'krw_total': Decimal(str(data.get('total_krw', '0'))),
+                'btc_total': Decimal(str(data.get('total_btc', '0')))
+            }
+        except Exception as e:
+            print(f"잔고 조회 중 오류 발생: {str(e)}")
+            return {
+                'krw_available': Decimal('0'),
+                'btc_available': Decimal('0'),
+                'krw_total': Decimal('0'),
+                'btc_total': Decimal('0')
+            }
+
     def _create_signature(self, endpoint: str, params: dict) -> dict:
         """API 요청 서명 및 헤더 생성"""
         nonce = str(int(time.time() * 1000))
         params['nonce'] = nonce
         
-        # 정렬된 파라미터 문자열 생성
-        query_string = urllib.parse.urlencode(params) if params else ''
-        
-        # 서명 데이터 준비
+        query_string = urllib.parse.urlencode(params)
         sign_data = endpoint + ";" + query_string + ";" + nonce
         
-        # HMAC-SHA512 서명 생성
         signature = hmac.new(
             self.api_secret,
             sign_data.encode('utf-8'),
             hashlib.sha512
         ).hexdigest()
         
-        # Base64 인코딩
         encoded_signature = base64.b64encode(signature.encode('utf-8')).decode('utf-8')
         
-        headers = {
+        return {
             'accept': 'application/json',
             'content-type': 'application/x-www-form-urlencoded',
             'api-client-type': '2',
@@ -56,8 +80,6 @@ class BithumbTradeExecutor:
             'Api-Nonce': nonce,
             'Api-Sign': encoded_signature
         }
-        
-        return headers
 
     def _send_request(self, endpoint: str, params: dict) -> dict:
         """API 요청 전송"""
@@ -65,142 +87,243 @@ class BithumbTradeExecutor:
             headers = self._create_signature(endpoint, params)
             url = f"{self.api_url}{endpoint}"
             
-            print(f"Request URL: {url}")
-            print(f"Request Headers: {headers}")
-            print(f"Request Params: {params}")
+            # print(f"Request URL: {url}")
+            # print(f"Request Headers: {headers}")
+            # print(f"Request Params: {params}")
             
             response = requests.post(url, headers=headers, data=params)
-            print(f"Response Status: {response.status_code}")
-            print(f"Response Content: {response.text}")
+            # print(f"Response Status: {response.status_code}")
+            # print(f"Response Content: {response.text}")
             
             response.raise_for_status()
             return response.json()
-            
         except requests.exceptions.RequestException as e:
             raise Exception(f"API 요청 실패: {str(e)}")
-
-    def get_balance(self) -> dict:
-        """BTC 잔고 조회"""
-        endpoint = "/info/balance"
-        params = {
-            'currency': 'BTC'
-        }
-        
-        try:
-            response = self._send_request(endpoint, params)
-            
-            if response['status'] == '5100':
-                raise Exception(f"인증 실패: {response.get('message')}")
-            
-            if response.get('status') != '0000':
-                raise Exception(f"잔고 조회 실패: {response.get('message')}")
-            
-            return {
-                'krw_available': Decimal(response['data']['available_krw']),
-                'available': Decimal(response['data']['available_btc']),
-                'current_price': Decimal(response['data']['xcoin_last_btc'])
-            }
-            
-        except Exception as e:
-            print(f"잔고 조회 중 오류 발생: {str(e)}")
-            raise e
 
     def execute_trade(self, decision: Dict[str, Any], max_investment: float, current_price: float) -> Dict:
         """거래 결정 실행"""
         try:
-            # 결정 파싱
-            trade_type = self._parse_decision(decision['decision'])
-            if not trade_type:
-                return {'status': 'SKIP', 'message': '관망 결정으로 인한 거래 건너뛰기'}
-            
-            # 잔고 확인
-            balance = self.get_balance()
-            
-            # 투자 금액 계산
-            investment_ratio = self._parse_investment_ratio(decision['decision'])
-            investment_amount = Decimal(str(min(max_investment * investment_ratio, float(balance['krw_available']))))
-            
-            if trade_type == 'BUY':
-                return self._place_buy_order(investment_amount, Decimal(str(current_price)))
-            else:  # SELL
-                return self._place_sell_order(balance['available'], Decimal(str(current_price)))
+            # 1. 결정 텍스트 파싱
+            if isinstance(decision, dict) and 'decision' in decision:
+                decision_text = decision['decision']
+                # 디버깅을 위한 출력
+                #print(f"\n=== 파싱할 결정 텍스트 ===\n{decision_text}")
                 
+                trade_type = self._parse_decision(decision_text)
+                #print(f"파싱된 거래 타입: {trade_type}")
+            else:
+                return {'status': 'ERROR', 'message': '잘못된 결정 형식'}
+
+            if trade_type == 'HOLD':
+                return {
+                    'status': 'SUCCESS',
+                    'type': 'HOLD',
+                    'message': '관망 결정으로 인한 거래 건너뛰기',
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+
+            # 3. 잔고 확인
+            balance = self.get_balance()
+            available_krw = Decimal(str(balance['krw_available']))
+            available_btc = Decimal(str(balance['btc_available']))
+
+            # 4. 투자 비중 계산
+            investment_ratio = self._parse_investment_ratio(decision_text)
+            investment_amount = Decimal(str(max_investment)) * Decimal(str(investment_ratio))
+
+            # 5. 매수/매도 결정 및 실행
+            if trade_type == 'BUY':
+                # 매수 가능 금액 확인
+                if available_krw < Decimal('10000'):  # 최소 주문 금액
+                    return {
+                        'status': 'ERROR',
+                        'type': 'BUY_FAIL',
+                        'message': f'잔액 부족 (현재 잔액: {float(available_krw):,.0f}원)',
+                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                
+                # 실제 매수 금액 조정
+                actual_investment = min(investment_amount, available_krw)
+                return self._place_buy_order(actual_investment, Decimal(str(current_price)))
+
+            elif trade_type == 'SELL':
+                # 매도 가능 수량 확인
+                if available_btc < self.min_trade_amounts['BTC']:
+                    return {
+                        'status': 'ERROR',
+                        'type': 'SELL_FAIL',
+                        'message': f'BTC 잔액 부족 (현재 보유량: {float(available_btc):.8f} BTC)',
+                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                
+                # 매도 수량 계산 (전체 보유량의 investment_ratio 만큼)
+                sell_quantity = available_btc * Decimal(str(investment_ratio))
+                return self._place_sell_order(sell_quantity, Decimal(str(current_price)))
+
+            return {
+                'status': 'ERROR',
+                'message': '거래 유형을 파싱할 수 없습니다',
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+
         except Exception as e:
             print(f"거래 실행 중 오류 발생: {str(e)}")
-            return {'status': 'ERROR', 'message': str(e)}
+            print(traceback.format_exc())
+            return {
+                'status': 'ERROR',
+                'message': str(e),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
 
-    def _parse_decision(self, decision_text: str) -> Optional[Literal['BUY', 'SELL']]:
-        """결정 텍스트 파싱"""
-        decision_text = decision_text.lower()
-        if '매수' in decision_text:
-            return 'BUY'
-        elif '매도' in decision_text:
-            return 'SELL'
-        return None
+    def _parse_decision(self, decision_text: str) -> str:
+        """거래 결정 텍스트 파싱"""
+        try:
+            # 결정 텍스트를 줄 단위로 분리하고 소문자로 변환
+            lines = decision_text.lower().split('\n')
+            for line in lines:
+                # "투자결정" 또는 "결정" 키워드가 있는 줄 찾기
+                if '투자결정' in line or '결정' in line:
+                    # 매수/매도/관망 결정 파싱
+                    if '매수' in line:
+                        return 'BUY'
+                    elif '매도' in line or '매각' in line:  # '매각'도 포함
+                        return 'SELL'
+                    elif '관망' in line:
+                        return 'HOLD'
+                    
+                    # 디버깅을 위한 출력
+                    print(f"파싱된 결정 라인: {line}")
+            
+            # 디버깅을 위한 전체 텍스트 출력
+            print(f"전체 결정 텍스트:\n{decision_text}")
+            
+            # 결정을 찾지 못한 경우
+            return 'HOLD'
+        except Exception as e:
+            print(f"결정 파싱 중 오류: {str(e)}")
+            return 'HOLD'
 
     def _parse_investment_ratio(self, decision_text: str) -> float:
         """투자 비중 파싱"""
         try:
-            import re
-            match = re.search(r'투자 비중:\s*(\d+)%', decision_text)
-            if match:
-                return float(match.group(1)) / 100
-            return 0.5  # 기본값
-        except:
+            # 투자 비중/비율 관련 키워드 찾기
+            keywords = ['투자 비중', '투자비중', '비중']
+            for keyword in keywords:
+                if keyword in decision_text:
+                    # 해당 라인 추출
+                    lines = decision_text.split('\n')
+                    ratio_line = next((line for line in lines if keyword in line), None)
+                    
+                    if ratio_line:
+                        # 숫자 추출 (백분율)
+                        import re
+                        matches = re.findall(r'(\d+)%', ratio_line)
+                        if matches:
+                            ratio = float(matches[0]) / 100
+                            return min(max(ratio, 0.0), 1.0)
+            
+            # 기본값 반환
             return 0.5
-
-    def _calculate_quantity(self, price: Decimal, investment_amount: Decimal) -> Decimal:
-        """주문 수량 계산"""
-        quantity = investment_amount / price
-        min_amount = self.min_trade_amounts.get(self.symbol, Decimal('0.0001'))
-        return quantity.quantize(min_amount, rounding=ROUND_DOWN)
+            
+        except Exception as e:
+            print(f"투자 비중 파싱 중 오류: {str(e)}")
+            return 0.5
 
     def _place_buy_order(self, investment_amount: Decimal, price: Decimal) -> Dict:
         """매수 주문 실행"""
-        quantity = self._calculate_quantity(price, investment_amount)
-        
-        endpoint = "/trade/place"
-        params = {
-            'order_currency': self.symbol,
-            'payment_currency': 'KRW',
-            'units': str(quantity),
-            'price': str(price),
-            'type': 'bid'
-        }
-        
-        response = self._send_request(endpoint, params)
-        if response['status'] != '0000':
-            raise Exception(f"매수 주문 실패: {response.get('message')}")
-        
-        return {
-            'status': 'SUCCESS',
-            'type': 'BUY',
-            'order_id': response['order_id'],
-            'quantity': float(quantity),
-            'price': float(price),
-            'total_amount': float(quantity * price)
-        }
+        try:
+            # 1. 수량 계산
+            quantity = (investment_amount / price).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)
+            
+            # 2. 최소 거래량 확인
+            if quantity < self.min_trade_amounts['BTC']:
+                return {
+                    'status': 'ERROR',
+                    'type': 'BUY_FAIL',
+                    'message': f'주문 수량이 최소 거래량({self.min_trade_amounts["BTC"]})보다 작습니다',
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+
+            # 3. 주문 파라미터 설정
+            params = {
+                'order_currency': self.symbol,
+                'payment_currency': 'KRW',
+                'units': str(quantity),
+                'price': str(price),
+                'type': 'bid'
+            }
+
+            # 4. API 요청 실행
+            response = self._send_request("/trade/place", params)
+            
+            # 5. 응답 처리
+            if response['status'] != '0000':
+                raise Exception(f"매수 주문 실패: {response.get('message')}")
+
+            # 6. 성공 결과 반환
+            return {
+                'status': 'SUCCESS',
+                'type': 'BUY',
+                'order_id': response['order_id'],
+                'quantity': float(quantity),
+                'price': float(price),
+                'total_amount': float(quantity * price),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+
+        except Exception as e:
+            print(f"매수 주문 실행 중 오류: {str(e)}")
+            return {
+                'status': 'ERROR',
+                'type': 'BUY_FAIL',
+                'message': str(e),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
 
     def _place_sell_order(self, quantity: Decimal, price: Decimal) -> Dict:
         """매도 주문 실행"""
-        endpoint = "/trade/place"
-        params = {
-            'order_currency': self.symbol,
-            'payment_currency': 'KRW',
-            'units': str(quantity),
-            'price': str(price),
-            'type': 'ask'
-        }
-        
-        response = self._send_request(endpoint, params)
-        if response['status'] != '0000':
-            raise Exception(f"매도 주문 실패: {response.get('message')}")
-        
-        return {
-            'status': 'SUCCESS',
-            'type': 'SELL',
-            'order_id': response['order_id'],
-            'quantity': float(quantity),
-            'price': float(price),
-            'total_amount': float(quantity * price)
-        }
+        try:
+            # 1. 최소 거래량 확인
+            if quantity < self.min_trade_amounts['BTC']:
+                return {
+                    'status': 'ERROR',
+                    'type': 'SELL_FAIL',
+                    'message': f'주문 수량이 최소 거래량({self.min_trade_amounts["BTC"]})보다 작습니다',
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+
+            # 2. 주문 파라미터 설정
+            params = {
+                'order_currency': self.symbol,
+                'payment_currency': 'KRW',
+                'units': str(quantity),
+                'price': str(price),
+                'type': 'ask'
+            }
+
+            # 3. API 요청 실행
+            response = self._send_request("/trade/place", params)
+            
+            # 4. 응답 처리
+            if response['status'] != '0000':
+                raise Exception(f"매도 주문 실패: {response.get('message')}")
+
+            # 5. 성공 결과 반환
+            return {
+                'status': 'SUCCESS',
+                'type': 'SELL',
+                'order_id': response['order_id'],
+                'quantity': float(quantity),
+                'price': float(price),
+                'total_amount': float(quantity * price),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+
+        except Exception as e:
+            print(f"매도 주문 실행 중 오류: {str(e)}")
+            return {
+                'status': 'ERROR',
+                'type': 'SELL_FAIL',
+                'message': str(e),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }

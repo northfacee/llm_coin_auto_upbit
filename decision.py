@@ -15,6 +15,7 @@ from price_collector import BithumbTrader
 from news_collector import NaverNewsCollector
 from trading import BithumbTradeExecutor
 import time
+import traceback  # traceback 모듈 추가
 
 # 환경 변수 및 LangSmith 설정
 load_dotenv()
@@ -61,21 +62,78 @@ def collect_latest_news():
         print(f"뉴스 수집 중 오류 발생: {e}")
 
 def get_market_data_once(state: AgentState) -> dict:
-    """시장 데이터를 매번 새로 수집하여 state에 저장"""
+    """시장 데이터를 안전하게 수집"""
     try:
-        # 항상 새로운 데이터를 수집
+        # 이미 market_data가 있다면 재사용
+        if state.get('market_data') and isinstance(state['market_data'], dict):
+            return state['market_data']
+            
         if not trader.analyzer.data_queue.empty():
             market_data = trader.analyzer.data_queue.get()
         else:
             market_data = trader.collect_market_data()
         
+        if not isinstance(market_data, dict):
+            print("Warning: market_data is not a dictionary")
+            market_data = {'error': 'Invalid data format'}
+            
+        if 'current_price' in market_data:
+            if not isinstance(market_data['current_price'], dict):
+                current_price_value = market_data['current_price']
+                market_data['current_price'] = {
+                    'closing_price': float(current_price_value),
+                    'opening_price': float(current_price_value),
+                    'max_price': float(current_price_value),
+                    'min_price': float(current_price_value)
+                }
+        
+        # analysis 구조 확인 및 수정
+        if 'analysis' in market_data:
+            for period in ['5m', '10m', '30m', '60m', '240m', '24h']:
+                if period in market_data['analysis']:
+                    period_data = market_data['analysis'][period]
+                    if not isinstance(period_data, dict):
+                        market_data['analysis'][period] = {}
+                    
+                    if 'moving_averages' not in market_data['analysis'][period] or \
+                       not isinstance(market_data['analysis'][period]['moving_averages'], dict):
+                        market_data['analysis'][period]['moving_averages'] = {
+                            '5': 'N/A',
+                            '10': 'N/A',
+                            '20': 'N/A',
+                            '50': 'N/A',
+                            '200': 'N/A'
+                        }
+        
         state['market_data'] = market_data
+        return market_data
         
     except Exception as e:
-        print(f"시장 데이터 수집 중 오류 발생: {e}")
-        state['market_data'] = None
-    
-    return state['market_data']
+        print(f"Error in get_market_data_once: {str(e)}")
+        # 기본 구조 반환
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'market': 'BTC_KRW',
+            'current_price': {'closing_price': 0},
+            'analysis': {
+                '30m': {
+                    'moving_averages': {'5': 'N/A', '10': 'N/A', '20': 'N/A', '50': 'N/A', '200': 'N/A'},
+                    'rsi': 'N/A',
+                    'stochastic': ['N/A', 'N/A'],
+                    'bollinger_bands': ['N/A', 'N/A', 'N/A'],
+                    'ema': {'12': 'N/A', '26': 'N/A'},
+                    'wma': {'20': 'N/A'},
+                    'dmi': ['N/A', 'N/A', 'N/A'],
+                    'atr': 'N/A',
+                    'obv': 'N/A',
+                    'vwap': 'N/A',
+                    'mfi': 'N/A',
+                    'williams_r': 'N/A',
+                    'cci': 'N/A',
+                    'change_rate': 'N/A'
+                }
+            }
+        }
 
 @tool
 def get_recent_news(dummy: str = "") -> str:
@@ -165,50 +223,175 @@ def price_analysis_agent(state: AgentState) -> AgentState:
         
         market_data = get_market_data_once(state)
         
-        prompt = f"""당신은 암호화폐 기술적 분석 전문가입니다. 
-        다음 데이터를 기반으로 투자 결정을 내려주세요.
+        # 데이터 검증을 위한 로깅
+        # print("\nMarket Data Structure:")
+        # print("Keys:", market_data.keys() if isinstance(market_data, dict) else "Not a dictionary")
+        
+        # 안전한 데이터 접근을 위한 함수들은 그대로 유지
+        def safe_get_nested(data, *keys, default='N/A'):
+            try:
+                result = data
+                for key in keys:
+                    if isinstance(result, dict):
+                        result = result.get(key, default)
+                    elif isinstance(result, (list, tuple)) and isinstance(key, int):
+                        result = result[key] if 0 <= key < len(result) else default
+                    else:
+                        return default
+                return result if result is not None else default
+            except Exception as e:
+                print(f"Error accessing {keys}: {str(e)}")
+                return default
 
-        30분 기준 기술적 지표:
-        - RSI: {market_data['analysis']['30m']['rsi']}
-        - Stochastic K/D: {market_data['analysis']['30m']['stochastic'][0]}/{market_data['analysis']['30m']['stochastic'][1]}
-        - MACD: {market_data['analysis']['30m']['macd'][0]}
-        - 볼린저 밴드: 
-          상단: {market_data['analysis']['30m']['bollinger_bands'][0]}
-          중간: {market_data['analysis']['30m']['bollinger_bands'][1]}
-          하단: {market_data['analysis']['30m']['bollinger_bands'][2]}
+        def format_number(value, default='N/A'):
+            if value == 'N/A':
+                return value
+            try:
+                if isinstance(value, (int, float)):
+                    return f"{value:,.2f}"
+                return str(default)
+            except:
+                return str(default)
         
-        24시간 추세:
-        - 이동평균선: {market_data['analysis']['24h']['moving_averages']}
-        - 거래량: {market_data['analysis']['24h']['ohlcv'][5]}
-        
-        호가 데이터:
-        - 매수호가: {market_data['orderbook']['bids'][:5]}
-        - 매도호가: {market_data['orderbook']['asks'][:5]}
-        
-        다음 형식으로 분석 결과를 제공해주세요:
-        1. 투자 결정: (매수/매도/관망)
-        2. 투자 비중: (0-100%)
-        3. 기술적 분석 요약
-        4. 주요 지표 해석
-        5. 목표가: (매수/매도 시)
-        6. 손절가: (매수/매도 시)
-        7. 투자 시점: (단기/중기/장기)
-        """
-        
-        response = llm.invoke(prompt)
-        timestamp = datetime.now()
-        current_price = market_data['current_price']['closing_price']
-        
-        state['results']['price_analysis'] = {
-            'analysis': response.content,
-            'timestamp': timestamp.isoformat()
-        }
-        
-        db_manager.save_price_analysis(
-            timestamp=timestamp,
-            current_price=current_price,
-            analysis_text=response.content
-        )
+        try:
+            # 모든 시간대의 분석 데이터 가져오기
+            time_periods = ['5m', '10m', '30m', '60m', '240m', '24h']
+            analysis_data = {}
+            
+            for period in time_periods:
+                analysis_data[period] = safe_get_nested(market_data, 'analysis', period, default={})
+                
+            current_price = safe_get_nested(market_data, 'current_price', 'closing_price', default=0)
+            
+            # 각 시간대별 분석 데이터 구성
+            analysis_by_period = {}
+            for period in time_periods:
+                period_data = analysis_data[period]
+                
+                # 이동평균선 데이터 처리
+                moving_averages = period_data.get('moving_averages', {})
+                
+                analysis_by_period[period] = {
+                    'MA': {
+                        'MA5': format_number(safe_get_nested(moving_averages, 5)),
+                        'MA10': format_number(safe_get_nested(moving_averages, 10)),
+                        'MA20': format_number(safe_get_nested(moving_averages, 20)),
+                        'MA50': format_number(safe_get_nested(moving_averages, 50)),
+                        'MA200': format_number(safe_get_nested(moving_averages, 200))
+                    },
+                    'RSI': format_number(safe_get_nested(period_data, 'rsi')),
+                    'Stochastic': {
+                        'K': format_number(safe_get_nested(period_data, 'stochastic', 0)),
+                        'D': format_number(safe_get_nested(period_data, 'stochastic', 1))
+                    },
+                    'BB': {
+                        'Upper': format_number(safe_get_nested(period_data, 'bollinger_bands', 0)),
+                        'Middle': format_number(safe_get_nested(period_data, 'bollinger_bands', 1)),
+                        'Lower': format_number(safe_get_nested(period_data, 'bollinger_bands', 2))
+                    },
+                    'EMA': {
+                        'EMA12': format_number(safe_get_nested(period_data, 'ema', '12')),
+                        'EMA26': format_number(safe_get_nested(period_data, 'ema', '26'))
+                    },
+                    'DMI': {
+                        '+DI': format_number(safe_get_nested(period_data, 'dmi', 0)),
+                        '-DI': format_number(safe_get_nested(period_data, 'dmi', 1)),
+                        'ADX': format_number(safe_get_nested(period_data, 'dmi', 2))
+                    },
+                    'ATR': format_number(safe_get_nested(period_data, 'atr')),
+                    'OBV': format_number(safe_get_nested(period_data, 'obv')),
+                    'VWAP': format_number(safe_get_nested(period_data, 'vwap')),
+                    'MFI': format_number(safe_get_nested(period_data, 'mfi')),
+                    'Williams_R': format_number(safe_get_nested(period_data, 'williams_r')),
+                    'CCI': format_number(safe_get_nested(period_data, 'cci')),
+                    'Change_Rate': format_number(safe_get_nested(period_data, 'change_rate'))
+                }
+            
+            # 프롬프트 구성
+            prompt = f"""당신은 암호화폐 기술적 분석 전문가입니다. 
+            다음 데이터를 기반으로 투자 결정을 내려주세요.
+            
+            현재가: {format_number(current_price)}원
+            
+            """
+            
+            # 각 시간대별 데이터를 프롬프트에 추가
+            for period in time_periods:
+                period_name = {
+                    '5m': '5분',
+                    '10m': '10분',
+                    '30m': '30분',
+                    '60m': '1시간',
+                    '240m': '4시간',
+                    '24h': '24시간'
+                }[period]
+                
+                data = analysis_by_period[period]
+                prompt += f"""
+                === {period_name} 기준 지표 ===
+                - RSI(14): {data['RSI']}
+                - Stochastic K/D: {data['Stochastic']['K']}/{data['Stochastic']['D']}
+                - 볼린저 밴드: 
+                  상단: {data['BB']['Upper']}
+                  중간: {data['BB']['Middle']}
+                  하단: {data['BB']['Lower']}
+                - 이동평균선:
+                  MA5: {data['MA']['MA5']}
+                  MA10: {data['MA']['MA10']}
+                  MA20: {data['MA']['MA20']}
+                  MA50: {data['MA']['MA50']}
+                  MA200: {data['MA']['MA200']}
+                - EMA:
+                  EMA12: {data['EMA']['EMA12']}
+                  EMA26: {data['EMA']['EMA26']}
+                - DMI: +DI={data['DMI']['+DI']}, -DI={data['DMI']['-DI']}, ADX={data['DMI']['ADX']}
+                - ATR: {data['ATR']}
+                - OBV: {data['OBV']}
+                - VWAP: {data['VWAP']}
+                - MFI: {data['MFI']}
+                - Williams %R: {data['Williams_R']}
+                - CCI: {data['CCI']}
+                - 변동률: {data['Change_Rate']}%
+                """
+            
+            prompt += """
+            다음 형식으로 분석 결과를 제공해주세요:
+            1. 투자 결정: (매수/매도/관망)
+            2. 투자 비중: (0-100%)
+            3. 기술적 분석 요약
+            4. 주요 지표 해석:
+               - 추세 지표 (이동평균선, MACD)
+               - 모멘텀 지표 (RSI, Stochastic, CCI)
+               - 거래량 지표 (OBV, MFI)
+               - 변동성 지표 (볼린저 밴드, ATR)
+            5. 시간대별 분석:
+               - 단기(5분-30분)
+               - 중기(1시간-4시간)
+            6. 목표가: (매수/매도 시)
+            7. 손절가: (매수/매도 시)
+            8. 투자 시점: (단기/중기/장기)
+            """
+            
+            response = llm.invoke(prompt)
+            timestamp = datetime.now()
+            
+            state['results']['price_analysis'] = {
+                'analysis': response.content,
+                'timestamp': timestamp.isoformat()
+            }
+            
+            db_manager.save_price_analysis(
+                timestamp=timestamp,
+                current_price=current_price,
+                analysis_text=response.content
+            )
+            
+        except Exception as e:
+            print(f"Error in price analysis: {str(e)}")
+            state['results']['price_analysis'] = {
+                'analysis': "기술적 분석 중 오류가 발생했습니다. 다음 분석을 기다려주세요.",
+                'timestamp': datetime.now().isoformat()
+            }
         
         return state
 
@@ -226,31 +409,46 @@ def final_decision_agent(state: AgentState) -> AgentState:
         )
         
         market_data = get_market_data_once(state)
-        current_price = market_data['current_price']['closing_price']
+        
+        # 현재가 안전하게 추출
+        try:
+            if isinstance(market_data.get('current_price'), (int, float)):
+                current_price = market_data['current_price']
+            elif isinstance(market_data.get('current_price'), dict):
+                current_price = market_data['current_price'].get('closing_price', 0)
+            else:
+                current_price = 0
+                print("Warning: Unable to determine current price format")
+        except Exception as e:
+            print(f"Error extracting current price: {e}")
+            current_price = 0
         
         prompt = f"""당신은 암호화폐 투자 최고 결정권자입니다.
-        뉴스 분석과 기술적 분석 결과를 종합하여 최종 투자 결정을 내려주세요.
-        결정을 내릴때 뉴스 7, 가격 3의 비율로 생각해서 결정해주세요. 즉, 뉴스의 영향력이 더 큽니다.
+        뉴스와 기술적 분석을 종합하여 투자를 결정하되, 현재 시장 상황을 고려해주세요.
+
+        매매시 비율은 최대 20%정도로 매매 해주세요.
         
-        뉴스 분석 결과:
+        [뉴스 분석]
         {state['results']['news_analysis']['analysis']}
         
-        기술적 분석 결과:
+        [기술적 분석]
         {state['results']['price_analysis']['analysis']}
         
-        현재 시장 상황:
-        - 현재가: {current_price}
-        - RSI: {market_data['analysis']['30m']['rsi']}
-        - MACD: {market_data['analysis']['30m']['macd'][0]}
-        
-        다음 형식으로 최종 결정을 제공해주세요:
-        1. 최종 투자 결정: (매수/매도/관망)
-        2. 최종 투자 비중: (0-100%)
-        3. 결정 이유: (종합적인 분석)
-        4. 위험도: (상/중/하)
-        5. 투자 전략: (단기/중기/장기)
-        6. 목표가 및 손절가
-        7. 주의사항
+        다음 항목들을 간단명료하게 답변해주세요:
+        1. 투자결정: 매수/매도/관망
+        2. 비중: 0-100%
+        3. 핵심근거: 
+           - 뉴스측면:
+           - 기술적측면:
+        4. 리스크:
+           - 위험도: 상/중/하
+           - 주의사항: 
+        5. 실행전략:
+           - 진입가격:
+           - 목표가:
+           - 손절가:
+           - 투자기간:
+           
         """
         
         response = llm.invoke(prompt)
@@ -268,95 +466,80 @@ def final_decision_agent(state: AgentState) -> AgentState:
         )
         
         return state
-
+    
 def execute_trading_decision(state: AgentState) -> None:
+    """거래 결정을 실행하는 함수"""
     try:
         if 'final_decision' not in state['results']:
             print("최종 결정이 없어 거래를 실행할 수 없습니다.")
             return
-        
-        final_decision = state['results']['final_decision']
-        current_price = float(state['market_data']['current_price']['closing_price'])
+
+        trade_executor = BithumbTradeExecutor()
         timestamp = datetime.now()
         
-        # 최종 결정 텍스트에서 거래 유형 파싱
-        decision_text = final_decision['decision'].lower()
-        
-        # 관망 결정인 경우
-        if "관망" in decision_text:
-            print("\n=== 거래 실행 결과 ===")
-            print("관망 결정으로 인해 거래를 실행하지 않습니다.")
-            
-            hold_order_id = f"HOLD_{timestamp.strftime('%Y%m%d%H%M%S')}"
-            db_manager.save_trade_execution(
-                timestamp=timestamp,
-                trade_type="HOLD",  # 순수한 관망 결정
-                quantity=0,
-                price=current_price,
-                total_amount=0,
-                order_id=hold_order_id
-            )
-            return
-
-        # 매수 결정일 때 잔액 확인
-        if "매수" in decision_text:
-            try:
-                # Bithumb API로부터 잔액 정보 가져오기
-                trade_executor = BithumbTradeExecutor()
-                balance_info = trade_executor.get_balance()  # 잔액 조회 메서드 필요
-                available_krw = float(balance_info.get('available_krw', 0))
-                
-                # 잔액이 만원 미만이면 BUY_CANT로 처리
-                if available_krw < 10000:
-                    print("\n=== 거래 실행 결과 ===")
-                    print(f"잔액({available_krw:,.0f}원)이 만원 미만이라 매수할 수 없습니다.")
-                    
-                    buy_cant_order_id = f"BUY_CANT_{timestamp.strftime('%Y%m%d%H%M%S')}"
-                    db_manager.save_trade_execution(
-                        timestamp=timestamp,
-                        trade_type="CANT_BUY",  # 잔액 부족으로 매수 불가
-                        quantity=0,
-                        price=current_price,
-                        total_amount=0,
-                        order_id=buy_cant_order_id
-                    )
-                    return
-                    
-            except Exception as e:
-                print(f"잔액 확인 중 오류 발생: {e}")
-                return
-
-        # 거래 실행기 초기화 (이미 초기화되어 있지 않은 경우)
         try:
-            if not trade_executor:
-                trade_executor = BithumbTradeExecutor()
-        except ValueError as ve:
-            print(f"거래 실행기 초기화 실패: {ve}")
-            return
-
-        # 거래 실행
-        result = trade_executor.execute_trade(
-            decision=final_decision,
-            max_investment=INVESTMENT,
-            current_price=current_price
-        )
-        
-        # 거래 결과 출력 및 저장
-        print("\n=== 거래 실행 결과 ===")
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-        
-        # 거래 결과를 데이터베이스에 저장 (성공한 경우에만)
-        if result['status'] == 'SUCCESS':
+            final_decision = state['results']['final_decision']
+            current_price = float(state['market_data']['current_price']['closing_price'])
+            
+            # 거래 실행
+            result = trade_executor.execute_trade(
+                decision=final_decision,
+                max_investment=INVESTMENT,
+                current_price=current_price
+            )
+            
+            # 거래 결과 출력
+            print("\n=== 거래 실행 결과 ===")
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            
+            # HOLD 타입일 경우 별도 처리
+            if result.get('type') == 'HOLD':
+                db_manager.save_trade_execution(
+                    timestamp=timestamp,
+                    trade_type='HOLD',
+                    quantity=0,
+                    price=current_price,  # 현재가 사용
+                    total_amount=0,
+                    order_id=f"HOLD_{timestamp.strftime('%Y%m%d%H%M%S')}"
+                )
+            # 실제 거래 케이스 처리
+            elif result['status'] == 'SUCCESS':
+                db_manager.save_trade_execution(
+                    timestamp=timestamp,
+                    trade_type=result['type'],
+                    quantity=result.get('quantity', 0),
+                    price=result.get('price', current_price),
+                    total_amount=result.get('total_amount', 0),
+                    order_id=result.get('order_id', f"{result['type']}_{timestamp.strftime('%Y%m%d%H%M%S')}")
+                )
+            # 에러 케이스 처리
+            else:
+                db_manager.save_trade_execution(
+                    timestamp=timestamp,
+                    trade_type=result.get('type', 'ERROR'),
+                    quantity=0,
+                    price=current_price,  # 현재가 사용
+                    total_amount=0,
+                    order_id=f"ERROR_{timestamp.strftime('%Y%m%d%H%M%S')}"
+                )
+                
+        except Exception as e:
+            print(f"거래 실행 중 오류 발생: {str(e)}")
+            print(traceback.format_exc())
+            
             db_manager.save_trade_execution(
                 timestamp=timestamp,
-                trade_type=result['type'],
-                quantity=result['quantity'],
-                price=result['price'],
-                total_amount=result['total_amount'],
-                order_id=result['order_id']
+                trade_type='ERROR',
+                quantity=0,
+                price=current_price,  # 현재가 사용
+                total_amount=0,
+                order_id=f"ERROR_{timestamp.strftime('%Y%m%d%H%M%S')}"
             )
+            
     except Exception as e:
-        print(f"거래 실행 중 오류 발생: {e}")
+        print(f"거래 실행 함수 전체 오류: {e}")
+        print("오류 세부 정보:", traceback.format_exc())
+
 
 def create_trading_workflow() -> Graph:
     """트레이딩 워크플로우 생성"""
@@ -421,7 +604,7 @@ def run_trading_analysis():
 
 def run_continuous_analysis():
     """30분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
-    WAIT_MINUTES = 20
+    WAIT_MINUTES = 1
     WAIT_SECONDS = WAIT_MINUTES * 60  # 30분을 초로 변환
     
     print("연속 트레이딩 분석 시작...")

@@ -4,7 +4,6 @@ from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import pandas as pd
 import requests
-import time
 from database_manager import DatabaseManager
 from trading import BithumbTradeExecutor  # BithumbTradeExecutor 추가
 import os
@@ -23,8 +22,14 @@ def get_account_balance():
         trader = BithumbTradeExecutor()
         balance = trader.get_balance()
         
-        # 현재 총 자산가치 계산
-        total_value = float(balance['available'] * balance['current_price'] + balance['krw_available'])
+        # 현재가 조회 (API에서 반환하는 값으로 수정)
+        market_url = "https://api.bithumb.com/public/ticker/BTC_KRW"
+        market_response = requests.get(market_url).json()
+        current_price = float(market_response['data']['closing_price'])
+        
+        # 현재 총 자산가치 계산 (BTC 가치 + KRW 잔고)
+        btc_value = float(balance['btc_available']) * current_price
+        total_value = btc_value + float(balance['krw_available'])
         
         # 수익률 계산 (전역 변수 INVESTMENT 사용)
         profit = total_value - INVESTMENT
@@ -195,7 +200,8 @@ def create_trading_chart(market_df, trade_df):
             'BUY': "rgba(255, 0, 0, 0.9)",          # 선명한 빨간색
             'HOLD': "rgba(255, 255, 0, 0.9)",       # 선명한 노란색
             'SELL': "rgba(0, 255, 255, 0.9)",       # 선명한 시안색
-            'CANT_BUY': "rgba(255, 0, 255, 0.9)"    # 선명한 마젠타(형광 보라)
+            'BUY_FAIL': "rgba(255, 0, 255, 0.9)",   # 선명한 마젠타(형광 보라)
+            'SELL_FAIL': "rgba(0, 255, 0, 0.9)"     # 형광초록색
         }
 
         # 매수/매도/홀드 시그널 추가
@@ -216,21 +222,6 @@ def create_trading_chart(market_df, trade_df):
                 ),
                 row=1, col=1
             )
-            
-            # # 거래량 차트에 수직선 추가
-            # fig.add_shape(
-            #     type="line",
-            #     x0=row['timestamp'],
-            #     x1=row['timestamp'],
-            #     y0=0,
-            #     y1=market_df['acc_trade_volume'].max() * 1.1,
-            #     line=dict(
-            #         color=line_color,
-            #         width=2,
-            #         dash="dash",
-            #     ),
-            #     row=2, col=1
-            # )
 
         # 범례 추가
         for trade_type, color in color_map.items():
@@ -239,7 +230,7 @@ def create_trading_chart(market_df, trade_df):
                     x=[None],
                     y=[None],
                     mode='lines',
-                    name=f'{trade_type.capitalize()} Signal',
+                    name=f'{trade_type} Signal',
                     line=dict(color=color, width=2, dash="dash"),
                     showlegend=True
                 ),
@@ -260,7 +251,7 @@ def create_trading_chart(market_df, trade_df):
     # 차트 스타일 설정
     current_price = market_df['closing_price'].iloc[-1]
     fig.update_layout(
-        title=f'Bitcoin Price Chart (Current: ₩{current_price:,.0f})',
+        title=f'현재 비트코인 가격 : ₩{current_price:,.0f}',
         yaxis=dict(
             title='Price (KRW)',
             range=[min_price - price_margin, max_price + price_margin],
@@ -336,7 +327,7 @@ def get_trade_executions(db, hours=24):
 
 def display_analysis_results(latest_analysis, all_analysis):
     """분석 결과를 표시하는 함수"""
-    st.header("Latest Analysis Results")
+    st.header("최근 분석 결과")
     
     # 탭 생성
     analysis_tabs = st.tabs(["Final Decision", "Price Analysis", "News Analysis"])
@@ -350,10 +341,8 @@ def display_analysis_results(latest_analysis, all_analysis):
         # Final Decision 탭
         with analysis_tabs[0]:
             if final_analysis is not None:
-                st.markdown("### Final Trading Decision")
+                #st.markdown("### Final Trading Decision")
                 st.markdown(f"**Timestamp:** {final_analysis['timestamp']}")
-                if pd.notnull(final_analysis['current_price']):
-                    st.markdown(f"**Current Price:** ₩{final_analysis['current_price']:,}")
                 st.text_area("Analysis", final_analysis['analysis_text'], height=300, key="final_decision")
             else:
                 st.info("No final decision analysis available.")
@@ -361,7 +350,7 @@ def display_analysis_results(latest_analysis, all_analysis):
         # Price Analysis 탭
         with analysis_tabs[1]:
             if price_analysis is not None:
-                st.markdown("### Technical Analysis")
+                #st.markdown("### Technical Analysis")
                 st.markdown(f"**Timestamp:** {price_analysis['timestamp']}")
                 st.text_area("Analysis", price_analysis['analysis_text'], height=300, key="price_analysis")
             else:
@@ -370,7 +359,7 @@ def display_analysis_results(latest_analysis, all_analysis):
         # News Analysis 탭
         with analysis_tabs[2]:
             if news_analysis is not None:
-                st.markdown("### News Analysis")
+                #st.markdown("### News Analysis")
                 st.markdown(f"**Timestamp:** {news_analysis['timestamp']}")
                 st.text_area("Analysis", news_analysis['analysis_text'], height=300, key="news_analysis")
             else:
@@ -424,7 +413,7 @@ def main():
         </style>
         """, unsafe_allow_html=True)
     
-    st.title('Bithumb Bitcoin Trading Monitor')
+    st.title('비트코인 자동매매 모니터링')
 
     # 데이터베이스 매니저 초기화
     db = DatabaseManager()
@@ -432,11 +421,11 @@ def main():
     display_metrics()
 
     # 사이드바 설정
-    st.sidebar.header('Settings')
+    st.sidebar.header('설정')
     
     # 새로고침 간격 설정
     st.session_state.refresh_interval = st.sidebar.slider(
-        'Refresh Interval (seconds)', 
+        '새로고침 간격', 
         min_value=1, 
         max_value=60, 
         value=st.session_state.refresh_interval
@@ -444,21 +433,21 @@ def main():
 
     # 캔들 간격 설정
     st.session_state.candle_interval = st.sidebar.selectbox(
-        'Candle Interval',
+        '캔들 간격',
         ['1m', '3m', '5m', '10m', '30m', '1h', '6h', '12h', '24h'],
         index=['1m', '3m', '5m', '10m', '30m', '1h', '6h', '12h', '24h'].index(st.session_state.candle_interval)
     )
 
     # 캔들 개수 설정
     st.session_state.candle_count = st.sidebar.slider(
-        'Number of Candles', 
+        '캔들 개수', 
         min_value=20, 
         max_value=200, 
         value=st.session_state.candle_count
     )
 
     # 탭 생성
-    tabs = st.tabs(["Trading Chart", "Trade History", "Analysis Results"])
+    tabs = st.tabs(["비트코인 차트", "매매 히스토리", "분석 결과"])
 
     # Trading Chart 탭
     with tabs[0]:
@@ -494,7 +483,7 @@ def main():
 
     # 현재 시간 표시
     st.sidebar.markdown("---")
-    st.sidebar.write("Last update:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    st.sidebar.write("최근 업데이트 시간:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     # main() 함수 내 trade_df 로드 후
     if not trade_df.empty:

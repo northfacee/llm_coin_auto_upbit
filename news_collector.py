@@ -14,7 +14,7 @@ class NaverNewsCollector:
         self.client_id = os.getenv('NAVER_CLIENT_ID')
         self.client_secret = os.getenv('NAVER_CLIENT_SECRET')
         self.db_manager = DatabaseManager()
-        self.search_keywords = ["비트코인", "이더리움", "나스닥", "미국대선","일론머스크"]
+        self.search_keywords = ["비트코인", "bitcoin", "etf", "이더리움","일론머스크","미국","도지코인","트럼프","BTC"]
         
         if not self.client_id or not self.client_secret:
             raise ValueError("네이버 API 키가 설정되지 않았습니다. .env 파일을 확인해주세요.")
