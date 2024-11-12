@@ -169,7 +169,7 @@ def news_analysis_agent(state: AgentState) -> AgentState:
     ):
         llm = ChatOpenAI(
             model="gpt-4o-mini",
-            temperature=0.7,
+            temperature=0.4,
             api_key=os.getenv('OPENAI_API_KEY')
         )
         
@@ -177,7 +177,6 @@ def news_analysis_agent(state: AgentState) -> AgentState:
         
         prompt = f"""당신은 암호화폐 뉴스 분석 전문가입니다. 
         최근 24시간 동안의 암호화폐 관련 뉴스만을 분석하여 투자 결정을 내려주세요.
-        기술적 지표나 가격은 고려하지 말고, 순수하게 뉴스 내용만으로 판단해주세요.
         
         뉴스 데이터:
         {news_data}
@@ -217,7 +216,7 @@ def price_analysis_agent(state: AgentState) -> AgentState:
     ):
         llm = ChatOpenAI(
             model="gpt-4o-mini",
-            temperature=0.7,
+            temperature=0.4,
             api_key=os.getenv('OPENAI_API_KEY')
         )
         
@@ -404,7 +403,7 @@ def final_decision_agent(state: AgentState) -> AgentState:
     ):
         llm = ChatOpenAI(
             model="gpt-4o-mini",
-            temperature=0.7,
+            temperature=0.3,
             api_key=os.getenv('OPENAI_API_KEY')
         )
         
@@ -424,9 +423,7 @@ def final_decision_agent(state: AgentState) -> AgentState:
             current_price = 0
         
         prompt = f"""당신은 암호화폐 투자 최고 결정권자입니다.
-        뉴스와 기술적 분석을 종합하여 투자를 결정하되, 현재 시장 상황을 고려해주세요.
-
-        매매시 비율은 최대 20%정도로 매매 해주세요.
+        뉴스와 기술적 분석을 종합하여 투자를 결정해주세요.
         
         [뉴스 분석]
         {state['results']['news_analysis']['analysis']}
@@ -435,13 +432,13 @@ def final_decision_agent(state: AgentState) -> AgentState:
         {state['results']['price_analysis']['analysis']}
         
         다음 항목들을 간단명료하게 답변해주세요:
-        1. 투자결정: 매수/매도/관망
-        2. 비중: 0-100%
+        1. 투자결정: (매수/매도/관망)
+        2. 비중: (0-20%)
         3. 핵심근거: 
            - 뉴스측면:
            - 기술적측면:
         4. 리스크:
-           - 위험도: 상/중/하
+           - 위험도: (상/중/하)
            - 주의사항: 
         5. 실행전략:
            - 진입가격:
