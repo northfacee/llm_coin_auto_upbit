@@ -437,6 +437,7 @@ def final_decision_agent(state: AgentState) -> AgentState:
 
         prompt = f"""
             당신은 암호화폐 투자 전문가이자 리스크 관리자입니다.
+            시장상황을 보고 적극적으로 매도/매수해도 됩니다.
             다음 정보들을 종합적으로 분석하고, 반드시 아래 가중치를 적용하여 최종 결정을 내려주세요:
 
             투자 결정 가중치:
@@ -627,7 +628,7 @@ def run_trading_analysis():
 
 def run_continuous_analysis():
     """30분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
-    WAIT_MINUTES = 1
+    WAIT_MINUTES = 15
     WAIT_SECONDS = WAIT_MINUTES * 60  # 30분을 초로 변환
     
     print("연속 트레이딩 분석 시작...")
