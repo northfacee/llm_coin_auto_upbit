@@ -176,7 +176,7 @@ def news_analysis_agent(state: AgentState) -> AgentState:
         news_data = get_recent_news.invoke("")
         
         prompt = f"""당신은 암호화폐 뉴스 분석 전문가입니다. 
-        최근 24시간 동안의 암호화폐 관련 뉴스만을 분석하여 투자 결정을 내려주세요.
+        특히 단기 가격 변동에 영향을 줄 수 있는 뉴스에 집중하여 분석해주세요.
         
         뉴스 데이터:
         {news_data}
@@ -186,7 +186,6 @@ def news_analysis_agent(state: AgentState) -> AgentState:
         2. 투자 비중: (0-100%)
         3. 결정 이유: (뉴스 기반 분석)
         4. 주요 뉴스 요약
-        5. 시장 영향도: (상/중/하)
         """
         
         response = llm.invoke(prompt)
@@ -222,11 +221,6 @@ def price_analysis_agent(state: AgentState) -> AgentState:
         
         market_data = get_market_data_once(state)
         
-        # 데이터 검증을 위한 로깅
-        # print("\nMarket Data Structure:")
-        # print("Keys:", market_data.keys() if isinstance(market_data, dict) else "Not a dictionary")
-        
-        # 안전한 데이터 접근을 위한 함수들은 그대로 유지
         def safe_get_nested(data, *keys, default='N/A'):
             try:
                 result = data
@@ -254,7 +248,7 @@ def price_analysis_agent(state: AgentState) -> AgentState:
         
         try:
             # 모든 시간대의 분석 데이터 가져오기
-            time_periods = ['5m', '10m', '30m', '60m', '240m', '24h']
+            time_periods = ['1m', '3m', '5m', '10m', '15m', '30m', '60m']
             analysis_data = {}
             
             for period in time_periods:
@@ -312,17 +306,26 @@ def price_analysis_agent(state: AgentState) -> AgentState:
             
             현재가: {format_number(current_price)}원
             
+            === 각 시간대별 변동률 ===
+            1분: {analysis_by_period['1m']['Change_Rate']}%
+            3분: {analysis_by_period['3m']['Change_Rate']}%
+            5분: {analysis_by_period['5m']['Change_Rate']}%
+            10분: {analysis_by_period['10m']['Change_Rate']}%
+            15분: {analysis_by_period['15m']['Change_Rate']}%
+            30분: {analysis_by_period['30m']['Change_Rate']}%
+            1시간: {analysis_by_period['60m']['Change_Rate']}%
             """
             
             # 각 시간대별 데이터를 프롬프트에 추가
             for period in time_periods:
                 period_name = {
+                    '1m': '1분',
+                    '3m': '3분',
                     '5m': '5분',
                     '10m': '10분',
+                    '15m': '15분',
                     '30m': '30분',
                     '60m': '1시간',
-                    '240m': '4시간',
-                    '24h': '24시간'
                 }[period]
                 
                 data = analysis_by_period[period]
@@ -355,6 +358,8 @@ def price_analysis_agent(state: AgentState) -> AgentState:
             
             prompt += """
             다음 형식으로 분석 결과를 제공해주세요:
+            특히 스캘핑과 데이트레이딩 관점에서 단기 수익 기회를 포착하는데 집중합니다.
+
             1. 투자 결정: (매수/매도/관망)
             2. 투자 비중: (0-100%)
             3. 기술적 분석 요약
@@ -364,11 +369,9 @@ def price_analysis_agent(state: AgentState) -> AgentState:
                - 거래량 지표 (OBV, MFI)
                - 변동성 지표 (볼린저 밴드, ATR)
             5. 시간대별 분석:
-               - 단기(5분-30분)
-               - 중기(1시간-4시간)
-            6. 목표가: (매수/매도 시)
-            7. 손절가: (매수/매도 시)
-            8. 투자 시점: (단기/중기/장기)
+               - 초단기(1분-5분)
+               - 단기(10분-30분)
+               - 중기(1시간)
             """
             
             response = llm.invoke(prompt)
@@ -402,7 +405,7 @@ def final_decision_agent(state: AgentState) -> AgentState:
         tags=["final", "decision"]
     ):
         llm = ChatOpenAI(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             temperature=0.3,
             api_key=os.getenv('OPENAI_API_KEY')
         )
@@ -428,8 +431,7 @@ def final_decision_agent(state: AgentState) -> AgentState:
             
             # 직접 문자열로 생성
             position_text = f"""현재 보유 포지션:
-            - 평균 매수가: {position.get('avg_price', 0):,.0f}원
-            - 현재 투자비율: {position.get('investment_ratio', 0):.2f}%"""
+            - 평균 매수가: {position.get('avg_price', 0):,.0f}원"""
 
         except Exception as e:
             print(f"포지션 정보 조회 실패: {e}")
@@ -438,6 +440,8 @@ def final_decision_agent(state: AgentState) -> AgentState:
         prompt = f"""
             당신은 암호화폐 투자 전문가이자 리스크 관리자입니다.
             시장상황을 보고 적극적으로 매도/매수해도 됩니다.
+            특히 스캘핑과 데이트레이딩 관점에서 단기 수익 기회를 포착하는데 집중합니다.
+
             다음 정보들을 종합적으로 분석하고, 반드시 아래 가중치를 적용하여 최종 결정을 내려주세요:
 
             투자 결정 가중치:
@@ -462,15 +466,13 @@ def final_decision_agent(state: AgentState) -> AgentState:
 
             1. 신규 투자 판단
             투자 결정: (매도/매수/관망) 중 하나만 선택
-            투자 비중: (0-30%)
-            중요: 투자 비중 결정은 반드시 0-30% 사이로 제한됩니다.
-            기존 포지션 대비 변동: (신규/증액/감소/청산)
+            투자 비중: (0-70%)
+            중요: 투자 비중 결정은 반드시 0-70% 사이로 제한됩니다.
 
             2. 포지션 조정 전략
             현재 포지션 평가:
             - 수익률 적정성
             - 리스크 노출도
-            - 비중의 적정성
 
             결론:
             시장 상황 종합과 최종 투자 판단을 간단히 서술해주세요."""

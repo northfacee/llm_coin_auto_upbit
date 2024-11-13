@@ -46,26 +46,6 @@ class BithumbTrader:
         self.headers = {"accept": "application/json"}
         self.analyzer = MarketDataAnalyzer()
 
-    # def get_transaction_history(self, symbol: str) -> Optional[List[Dict]]:
-    #     """최근 체결 내역 조회"""
-    #     try:
-    #         url = f"{self.base_url}/public/transaction_history/{symbol}_KRW"
-    #         print(f"요청 URL: {url}")
-            
-    #         response = requests.get(url, headers=self.headers)
-    #         response.raise_for_status()
-    #         data = response.json()
-            
-    #         if data['status'] != '0000':
-    #             print(f"API 에러: {data.get('message', '알 수 없는 에러')}")
-    #             return None
-            
-    #         return data['data']
-            
-    #     except Exception as e:
-    #         print(f"체결 내역 조회 실패: {e}")
-    #         return None
-
     def get_current_price(self, symbol: str = "BTC") -> Optional[Dict]:
         """현재가 정보 조회"""
         try:
@@ -131,8 +111,6 @@ class BithumbTrader:
             return 0.0
         return ((current_price - comparison_price) / comparison_price) * 100
 
-# price_collector.py의 run_trading_bot 메서드 부분 수정
-
     def run_trading_bot(self, market: str = "BTC", interval: int = 60):
         """데이터 수집 봇 실행"""
         print(f"데이터 수집 및 시작 - {market}")
@@ -147,17 +125,16 @@ class BithumbTrader:
                     
                     # 변동률 출력
                     print("\n각 시간대별 변동률:")
-                    for timeframe in ['5m', '10m', '30m', '60m', '240m', '24h']:
+                    for timeframe in ['1m', '3m', '5m', '10m', '15m', '30m', '60m']:
                         if timeframe in market_data['analysis']:
                             print(f"{timeframe}: {market_data['analysis'][timeframe]['change_rate']:.2f}%")
                     
                     # 기술적 지표 출력
-                    for timeframe in ['5m', '10m', '30m', '60m', '240m']:
+                    for timeframe in ['1m', '3m', '5m', '10m', '15m', '30m', '60m']:
                         if timeframe in market_data['analysis']:
                             analysis = market_data['analysis'][timeframe]
                             print(f"\n{timeframe} 기술적 지표:")
                             
-                            # 기존 지표들
                             if 'rsi' in analysis:
                                 print(f"RSI(14): {analysis['rsi']:.2f}")
                             
@@ -186,7 +163,6 @@ class BithumbTrader:
                                     if value is not None:
                                         print(f"  WMA{period}: {value:,.0f}")
                             
-                            # 추가 지표들 출력
                             if 'dmi' in analysis and all(x is not None for x in analysis['dmi']):
                                 plus_di, minus_di, adx = analysis['dmi']
                                 print(f"DMI: +DI={plus_di:.2f}, -DI={minus_di:.2f}, ADX={adx:.2f}")
@@ -229,8 +205,8 @@ class BithumbTrader:
             # 캔들스틱 데이터 수집 및 변동률 계산
             analysis_results = {}
             
-            # 분봉 데이터 수집 (5분~240분)
-            for unit in [5, 10, 30, 60, 240]:
+            # 분봉 데이터 수집 (1분~60분)
+            for unit in [1, 3, 5, 10, 15, 30, 60]:
                 try:
                     data = self.get_minute_candles(market, unit, count=200)
                     
@@ -238,13 +214,12 @@ class BithumbTrader:
                         data = sorted(data, key=lambda x: x['timestamp'], reverse=True)
                         
                         now_price = float(data[0]['trade_price'])
-                        comparison_index = min(unit // 5, len(data) - 1)
+                        comparison_index = min(unit, len(data) - 1)
                         prev_price = float(data[comparison_index]['opening_price'])
                         
                         change_rate = ((now_price - prev_price) / prev_price) * 100
                         
                         if len(data) >= 200:
-                            # API 응답 키값에 맞게 수정
                             prices_list = [float(candle['trade_price']) for candle in data[:200]]
                             highs_list = [float(candle['high_price']) for candle in data[:200]]
                             lows_list = [float(candle['low_price']) for candle in data[:200]]
