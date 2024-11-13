@@ -438,7 +438,10 @@ def final_decision_agent(state: AgentState) -> AgentState:
             
             position_text = f"""현재 보유 포지션:
             - 평균 매수가: {avg_price:,.0f}원
-            - 현재 수익률: {profit_rate:.2f}%"""
+            - 현재 수익률: {profit_rate:.2f}%
+            - 총 투자금액: {investment:,.0f}원
+            - 보유 수량: {quantity:.8f} BTC
+            """
 
         except Exception as e:
             print(f"포지션 정보 조회 실패: {e}")
