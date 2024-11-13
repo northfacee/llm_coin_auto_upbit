@@ -408,6 +408,7 @@ def final_decision_agent(state: AgentState) -> AgentState:
         )
         
         market_data = get_market_data_once(state)
+        current_price = 0
         
         # 현재가 안전하게 추출
         try:
@@ -420,34 +421,59 @@ def final_decision_agent(state: AgentState) -> AgentState:
                 print("Warning: Unable to determine current price format")
         except Exception as e:
             print(f"Error extracting current price: {e}")
-            current_price = 0
-        
-        prompt = f"""당신은 암호화폐 투자 최고 결정권자입니다.
-        뉴스와 기술적 분석을 종합하여 투자를 결정해주세요.
-        
-        [뉴스 분석]
-        {state['results']['news_analysis']['analysis']}
-        
-        [기술적 분석]
-        {state['results']['price_analysis']['analysis']}
-        
-        다음 항목들을 간단명료하게 답변해주세요:
-        1. 투자결정: (매수/매도/관망)
-        2. 비중: (0-20%)
-        3. 핵심근거: 
-           - 뉴스측면:
-           - 기술적측면:
-        4. 리스크:
-           - 위험도: (상/중/하)
-           - 주의사항: 
-        5. 실행전략:
-           - 진입가격:
-           - 목표가:
-           - 손절가:
-           - 투자기간:
-           
-        """
-        
+
+        # 포지션 정보 가져오기
+        try:
+            position = trade_executor.get_current_position()
+            
+            # 직접 문자열로 생성
+            position_text = f"""현재 보유 포지션:
+            - 평균 매수가: {position.get('avg_price', 0):,.0f}원
+            - 현재 투자비율: {position.get('investment_ratio', 0):.2f}%"""
+
+        except Exception as e:
+            print(f"포지션 정보 조회 실패: {e}")
+            position_text = "현재 보유 중인 포지션이 없습니다."
+
+        prompt = f"""
+            당신은 암호화폐 투자 전문가이자 리스크 관리자입니다.
+            다음 정보들을 종합적으로 분석하고, 반드시 아래 가중치를 적용하여 최종 결정을 내려주세요:
+
+            투자 결정 가중치:
+            - 가격 분석 결과: 80% 반영
+            - 뉴스 분석 결과: 20% 반영
+
+            시장 현황
+            현재가: {current_price:,.0f}원
+
+            포지션 분석
+            {position_text}
+
+            시장 분석
+            [뉴스 분석]
+            {state['results']['news_analysis']['analysis']}
+
+            [기술적 분석]
+            {state['results']['price_analysis']['analysis']}
+
+            투자 결정 요청
+            다음 항목들을 상세히 분석하여 답변해주세요:
+
+            1. 신규 투자 판단
+            투자 결정: (매도/매수/관망) 중 하나만 선택
+            투자 비중: (0-30%)
+            중요: 투자 비중 결정은 반드시 0-30% 사이로 제한됩니다.
+            기존 포지션 대비 변동: (신규/증액/감소/청산)
+
+            2. 포지션 조정 전략
+            현재 포지션 평가:
+            - 수익률 적정성
+            - 리스크 노출도
+            - 비중의 적정성
+
+            결론:
+            시장 상황 종합과 최종 투자 판단을 간단히 서술해주세요."""
+
         response = llm.invoke(prompt)
         timestamp = datetime.now()
         
@@ -601,7 +627,7 @@ def run_trading_analysis():
 
 def run_continuous_analysis():
     """30분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
-    WAIT_MINUTES = 20
+    WAIT_MINUTES = 1
     WAIT_SECONDS = WAIT_MINUTES * 60  # 30분을 초로 변환
     
     print("연속 트레이딩 분석 시작...")
