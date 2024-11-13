@@ -10,6 +10,8 @@ import os
 from dotenv import load_dotenv
 import json
 import traceback
+import sqlite3
+from datetime import datetime, timedelta
 
 class BithumbTradeExecutor:
     def __init__(self):
@@ -19,7 +21,8 @@ class BithumbTradeExecutor:
         self.api_key = os.getenv('BITHUMB_API_KEY')
         self.api_secret = os.getenv('BITHUMB_API_SECRET').encode('utf-8')
         self.symbol = "BTC"
-        
+        self.db_path = "crypto_analysis.db"
+
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials not found in environment variables")
         
@@ -106,11 +109,7 @@ class BithumbTradeExecutor:
             # 1. 결정 텍스트 파싱
             if isinstance(decision, dict) and 'decision' in decision:
                 decision_text = decision['decision']
-                # 디버깅을 위한 출력
-                #print(f"\n=== 파싱할 결정 텍스트 ===\n{decision_text}")
-                
                 trade_type = self._parse_decision(decision_text)
-                #print(f"파싱된 거래 타입: {trade_type}")
             else:
                 return {'status': 'ERROR', 'message': '잘못된 결정 형식'}
 
@@ -127,9 +126,16 @@ class BithumbTradeExecutor:
             available_krw = Decimal(str(balance['krw_available']))
             available_btc = Decimal(str(balance['btc_available']))
 
-            # 4. 투자 비중 계산
+            # 4. 투자 비중 계산 및 로깅
             investment_ratio = self._parse_investment_ratio(decision_text)
-            investment_amount = Decimal(str(max_investment)) * Decimal(str(investment_ratio))
+            max_investment_decimal = Decimal(str(max_investment))
+            investment_amount = max_investment_decimal * Decimal(str(investment_ratio))
+            
+            print(f"\n=== 투자 계산 상세 ===")
+            print(f"최대 투자금액: {float(max_investment_decimal):,.0f}원")
+            print(f"투자 비중: {float(investment_ratio)*100:.1f}%")
+            print(f"계산된 투자금액: {float(investment_amount):,.0f}원")
+            print(f"사용 가능한 KRW: {float(available_krw):,.0f}원")
 
             # 5. 매수/매도 결정 및 실행
             if trade_type == 'BUY':
@@ -144,6 +150,7 @@ class BithumbTradeExecutor:
                 
                 # 실제 매수 금액 조정
                 actual_investment = min(investment_amount, available_krw)
+                print(f"실제 투자금액: {float(actual_investment):,.0f}원")
                 return self._place_buy_order(actual_investment, Decimal(str(current_price)))
 
             elif trade_type == 'SELL':
@@ -207,7 +214,7 @@ class BithumbTradeExecutor:
         """투자 비중 파싱"""
         try:
             # 투자 비중/비율 관련 키워드 찾기
-            keywords = ['투자 비중', '투자비중', '비중']
+            keywords = ['투자 비중', '투자비중']
             for keyword in keywords:
                 if keyword in decision_text:
                     # 해당 라인 추출
@@ -232,15 +239,20 @@ class BithumbTradeExecutor:
     def _place_buy_order(self, investment_amount: Decimal, price: Decimal) -> Dict:
         """매수 주문 실행"""
         try:
-            # 1. 수량 계산
+            # 1. 수량 계산 - 투자금액을 현재가로 나누어 구매 가능한 수량 계산
             quantity = (investment_amount / price).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)
+            
+            print(f"투자 계산 정보:")
+            print(f"- 투자금액: {float(investment_amount):,.0f}원")
+            print(f"- 현재가: {float(price):,.0f}원")
+            print(f"- 계산된 수량: {float(quantity):.8f} BTC")
             
             # 2. 최소 거래량 확인
             if quantity < self.min_trade_amounts['BTC']:
                 return {
                     'status': 'ERROR',
                     'type': 'BUY_FAIL',
-                    'message': f'주문 수량이 최소 거래량({self.min_trade_amounts["BTC"]})보다 작습니다',
+                    'message': f'주문 수량({float(quantity):.8f})이 최소 거래량({self.min_trade_amounts["BTC"]})보다 작습니다',
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
 
@@ -327,3 +339,77 @@ class BithumbTradeExecutor:
                 'message': str(e),
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
             }
+        
+    def get_current_position(self) -> Dict[str, Any]:
+        """현재 매수 포지션의 평균 매수가와 수량을 조회하고 잔고와 비교"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 모든 BUY 거래 조회
+                query = """
+                SELECT quantity, price, total_amount
+                FROM trade_executions
+                WHERE trade_type = 'BUY'
+                ORDER BY timestamp DESC
+                """
+                
+                cursor.execute(query)
+                trades = cursor.fetchall()
+                
+                if not trades:
+                    return {
+                        'avg_price': 0,
+                        'total_quantity': 0,
+                        'total_investment': 0,
+                        'investment_ratio': 0
+                    }
+                
+                # 평균 매수가 및 총 수량 계산
+                total_quantity = sum(Decimal(str(trade[0])) for trade in trades)
+                total_investment = sum(Decimal(str(trade[2])) for trade in trades)
+                
+                if total_quantity > 0:
+                    avg_price = total_investment / total_quantity
+                else:
+                    avg_price = Decimal('0')
+                
+                # 현재 잔고 조회
+                balance = self.get_balance()
+                krw_total = Decimal(str(balance['krw_total']))
+                
+                # 투자 비율 계산 (총 투자금액 / 총 자산)
+                total_assets = krw_total + total_investment
+                investment_ratio = (total_investment / total_assets * 100) if total_assets > 0 else Decimal('0')
+                
+                return {
+                    'avg_price': float(avg_price),
+                    'total_quantity': float(total_quantity),
+                    'total_investment': float(total_investment),
+                    'investment_ratio': float(investment_ratio)
+                }
+                    
+        except Exception as e:
+            print(f"포지션 정보 조회 중 오류 발생: {str(e)}")
+            return {
+                'avg_price': 0,
+                'total_quantity': 0,
+                'total_investment': 0,
+                'investment_ratio': 0
+            }
+
+    def _get_current_price(self) -> float:
+        """현재 BTC 가격 조회"""
+        try:
+            url = f"{self.api_url}/public/ticker/{self.symbol}_KRW"
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['status'] == '0000':
+                return float(data['data']['closing_price'])
+            return 0
+            
+        except Exception as e:
+            print(f"현재가 조회 중 오류 발생: {str(e)}")
+            return 0

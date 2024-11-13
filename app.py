@@ -44,7 +44,63 @@ def get_account_balance():
     except Exception as e:
         print(f"잔고 조회 중 오류 발생: {e}")
         return None
-
+    
+def get_current_position(self) -> dict:
+    """현재 포지션 정보 조회"""
+    try:
+        # 잔고 조회
+        balance = self.get_balance()
+        
+        # 현재가 조회
+        market_url = "https://api.bithumb.com/public/ticker/BTC_KRW"
+        market_response = requests.get(market_url).json()
+        current_price = float(market_response['data']['closing_price'])
+        
+        # BTC 가치 및 총 자산가치 계산
+        btc_quantity = float(balance['btc_available'])
+        btc_value = btc_quantity * current_price
+        total_value = btc_value + float(balance['krw_available'])
+        
+        # 평균 매수가 계산 (BTC 보유 시)
+        avg_price = 0
+        if btc_quantity > 0:
+            try:
+                investment_per_btc = float(os.getenv('INVESTMENT')) / btc_quantity
+                avg_price = investment_per_btc
+            except:
+                avg_price = current_price  # 평균 매수가 계산 실패 시 현재가로 대체
+        
+        # 수익률 계산
+        try:
+            investment = float(os.getenv('INVESTMENT'))
+            profit = total_value - investment
+            profit_rate = ((total_value - investment) / investment) * 100
+        except:
+            profit = 0
+            profit_rate = 0
+            
+        return {
+            'quantity': btc_quantity,
+            'avg_price': avg_price,
+            'current_price': current_price,
+            'total_value': total_value,
+            'profit_amount': profit,
+            'profit_rate': profit_rate,
+            'krw_available': float(balance['krw_available'])
+        }
+        
+    except Exception as e:
+        print(f"포지션 정보 조회 중 오류 발생: {e}")
+        return {
+            'quantity': 0,
+            'avg_price': 0,
+            'current_price': 0,
+            'total_value': 0,
+            'profit_amount': 0,
+            'profit_rate': 0,
+            'krw_available': 0
+        }
+    
 def display_metrics():
     """메트릭 정보를 표시하는 함수"""
     balance_info = get_account_balance()
