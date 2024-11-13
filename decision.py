@@ -27,7 +27,7 @@ except TypeError:
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
-os.environ["LANGCHAIN_PROJECT"] = "crypto-trading-analysis"
+os.environ["LANGCHAIN_PROJECT"] = "bitcoin_agent"
 
 
 # 상태 타입 정의
@@ -140,7 +140,7 @@ def get_recent_news(dummy: str = "") -> str:
     """최근 24시간 동안의 암호화폐 관련 뉴스를 가져옵니다."""
     with langsmith.trace(
         name="get_recent_news",
-        project_name="crypto-trading-analysis",
+        project_name="bitcoin_agent",
         tags=["news", "data-collection"]
     ):
         # 최신 뉴스 수집을 먼저 실행
@@ -164,12 +164,12 @@ def news_analysis_agent(state: AgentState) -> AgentState:
     """뉴스만을 분석하여 투자 제안을 하는 에이전트"""
     with langsmith.trace(
         name="news_analysis_agent",
-        project_name="crypto-trading-analysis",
+        project_name="bitcoin_agent",
         tags=["news", "analysis"]
     ):
         llm = ChatOpenAI(
             model="gpt-4o-mini",
-            temperature=0.4,
+            temperature=0.3,
             api_key=os.getenv('OPENAI_API_KEY')
         )
         
@@ -210,12 +210,12 @@ def price_analysis_agent(state: AgentState) -> AgentState:
     """기술적 지표와 시장 데이터를 분석하여 투자 제안을 하는 에이전트"""
     with langsmith.trace(
         name="price_analysis_agent",
-        project_name="crypto-trading-analysis",
+        project_name="bitcoin_agent",
         tags=["price", "analysis"]
     ):
         llm = ChatOpenAI(
             model="gpt-4o-mini",
-            temperature=0.4,
+            temperature=0.3,
             api_key=os.getenv('OPENAI_API_KEY')
         )
         
@@ -401,12 +401,12 @@ def final_decision_agent(state: AgentState) -> AgentState:
     """뉴스 분석과 기술적 분석을 종합하여 최종 투자 결정을 내리는 에이전트"""
     with langsmith.trace(
         name="final_decision_agent",
-        project_name="crypto-trading-analysis",
+        project_name="bitcoin_agent",
         tags=["final", "decision"]
     ):
         llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0.3,
+            model="gpt-4o-mini",
+            temperature=0.2,
             api_key=os.getenv('OPENAI_API_KEY')
         )
         
@@ -428,10 +428,17 @@ def final_decision_agent(state: AgentState) -> AgentState:
         # 포지션 정보 가져오기
         try:
             position = trade_executor.get_current_position()
+            avg_price = position.get('avg_price', 0)
+            quantity = position.get('total_quantity', 0)
+            investment = position.get('total_investment', 0)
+            ratio = position.get('investment_ratio', 0)
             
-            # 직접 문자열로 생성
+            # 수익률 계산
+            profit_rate = ((current_price - avg_price) / avg_price * 100) if avg_price > 0 else 0
+            
             position_text = f"""현재 보유 포지션:
-            - 평균 매수가: {position.get('avg_price', 0):,.0f}원"""
+            - 평균 매수가: {avg_price:,.0f}원
+            - 현재 수익률: {profit_rate:.2f}%"""
 
         except Exception as e:
             print(f"포지션 정보 조회 실패: {e}")
@@ -442,11 +449,11 @@ def final_decision_agent(state: AgentState) -> AgentState:
             시장상황을 보고 적극적으로 매도/매수해도 됩니다.
             특히 스캘핑과 데이트레이딩 관점에서 단기 수익 기회를 포착하는데 집중합니다.
 
-            다음 정보들을 종합적으로 분석하고, 반드시 아래 가중치를 적용하여 최종 결정을 내려주세요:
+            다음 정보들을 종합적으로 분석하고, 반드시 아래 가중치를 적용하여 신중하게 최종 결정을 내려주세요:
 
             투자 결정 가중치:
-            - 가격 분석 결과: 80% 반영
-            - 뉴스 분석 결과: 20% 반영
+            - 가격 분석 결과: 85% 반영
+            - 뉴스 분석 결과: 15% 반영
 
             시장 현황
             현재가: {current_price:,.0f}원
@@ -463,6 +470,8 @@ def final_decision_agent(state: AgentState) -> AgentState:
 
             투자 결정 요청
             다음 항목들을 상세히 분석하여 답변해주세요:
+
+            매우 중요 : 수익률이 +1%가 넘어가거나 -1%가 넘어가면 전량 매도하세요.
 
             1. 신규 투자 판단
             투자 결정: (매도/매수/관망) 중 하나만 선택
@@ -600,7 +609,7 @@ def run_trading_analysis():
         
         with langsmith.trace(
             name="complete_trading_analysis",
-            project_name="crypto-trading-analysis",
+            project_name="bitcoin_agent",
             tags=["workflow", "complete"]
         ) as tracer:
             result = app.invoke(config)
@@ -630,7 +639,7 @@ def run_trading_analysis():
 
 def run_continuous_analysis():
     """30분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
-    WAIT_MINUTES = 15
+    WAIT_MINUTES = 3
     WAIT_SECONDS = WAIT_MINUTES * 60  # 30분을 초로 변환
     
     print("연속 트레이딩 분석 시작...")

@@ -12,6 +12,8 @@ import json
 import traceback
 import sqlite3
 from datetime import datetime, timedelta
+import jwt
+import uuid
 
 class BithumbTradeExecutor:
     def __init__(self):
@@ -20,6 +22,8 @@ class BithumbTradeExecutor:
         self.api_url = "https://api.bithumb.com"
         self.api_key = os.getenv('BITHUMB_API_KEY')
         self.api_secret = os.getenv('BITHUMB_API_SECRET').encode('utf-8')
+        self.api_key_v2 = os.getenv('BITHUMB_API_KEY_V2')
+        self.api_secret_v2 = os.getenv('BITHUMB_API_SECRET_V2')
         self.symbol = "BTC"
         self.db_path = "crypto_analysis.db"
 
@@ -31,6 +35,69 @@ class BithumbTradeExecutor:
             'ETH': Decimal('0.001'),
             'XRP': Decimal('1'),
         }
+
+    def _create_signature(self, endpoint: str, params: dict) -> dict:
+        """API 요청 서명 및 헤더 생성"""
+        nonce = str(int(time.time() * 1000))
+        params['nonce'] = nonce
+        
+        query_string = urllib.parse.urlencode(params)
+        sign_data = endpoint + ";" + query_string + ";" + nonce
+        
+        signature = hmac.new(
+            self.api_secret,
+            sign_data.encode('utf-8'),
+            hashlib.sha512
+        ).hexdigest()
+        
+        encoded_signature = base64.b64encode(signature.encode('utf-8')).decode('utf-8')
+        
+        return {
+            'accept': 'application/json',
+            'content-type': 'application/x-www-form-urlencoded',
+            'api-client-type': '2',
+            'Api-Key': self.api_key,
+            'Api-Nonce': nonce,
+            'Api-Sign': encoded_signature
+        }
+
+    def _create_jwt_token(self) -> str:
+        """JWT 토큰 생성"""
+        payload = {
+            'access_key': self.api_key_v2,
+            'nonce': str(uuid.uuid4()),
+            'timestamp': round(time.time() * 1000)
+        }
+        jwt_token = jwt.encode(payload, self.api_secret_v2, algorithm='HS256')
+        return f'Bearer {jwt_token}'
+
+    def _send_request(self, endpoint: str, params: dict) -> dict:
+        """API 요청 전송"""
+        try:
+            headers = self._create_signature(endpoint, params)
+            url = f"{self.api_url}{endpoint}"
+            
+            response = requests.post(url, headers=headers, data=params)
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"API 요청 실패: {str(e)}")
+
+    def get_account_info(self) -> list:
+        """전체 계좌 정보 조회"""
+        try:
+            headers = {
+                'Authorization': self._create_jwt_token()
+            }
+            
+            response = requests.get(f"{self.api_url}/v1/accounts", headers=headers)
+            response.raise_for_status()
+            return response.json()
+            
+        except Exception as e:
+            print(f"계좌 정보 조회 중 오류 발생: {str(e)}")
+            return []
 
     def get_balance(self) -> dict:
         """계좌 잔고 조회"""
@@ -59,49 +126,61 @@ class BithumbTradeExecutor:
                 'btc_total': Decimal('0')
             }
 
-    def _create_signature(self, endpoint: str, params: dict) -> dict:
-        """API 요청 서명 및 헤더 생성"""
-        nonce = str(int(time.time() * 1000))
-        params['nonce'] = nonce
-        
-        query_string = urllib.parse.urlencode(params)
-        sign_data = endpoint + ";" + query_string + ";" + nonce
-        
-        signature = hmac.new(
-            self.api_secret,
-            sign_data.encode('utf-8'),
-            hashlib.sha512
-        ).hexdigest()
-        
-        encoded_signature = base64.b64encode(signature.encode('utf-8')).decode('utf-8')
-        
-        return {
-            'accept': 'application/json',
-            'content-type': 'application/x-www-form-urlencoded',
-            'api-client-type': '2',
-            'Api-Key': self.api_key,
-            'Api-Nonce': nonce,
-            'Api-Sign': encoded_signature
-        }
-
-    def _send_request(self, endpoint: str, params: dict) -> dict:
-        """API 요청 전송"""
+    def get_current_position(self) -> Dict[str, Any]:
+        """현재 포지션 정보 조회"""
         try:
-            headers = self._create_signature(endpoint, params)
-            url = f"{self.api_url}{endpoint}"
+            account_info = self.get_account_info()
             
-            # print(f"Request URL: {url}")
-            # print(f"Request Headers: {headers}")
-            # print(f"Request Params: {params}")
+            # BTC 데이터 찾기
+            btc_data = next((item for item in account_info 
+                           if item.get('currency') == 'BTC'), None)
             
-            response = requests.post(url, headers=headers, data=params)
-            # print(f"Response Status: {response.status_code}")
-            # print(f"Response Content: {response.text}")
+            if not btc_data:
+                return {
+                    'avg_price': 0,
+                    'total_quantity': 0,
+                    'total_investment': 0,
+                    'investment_ratio': 0
+                }
             
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"API 요청 실패: {str(e)}")
+            # 데이터 추출
+            balance = Decimal(str(btc_data.get('balance', '0')))
+            locked = Decimal(str(btc_data.get('locked', '0')))
+            avg_buy_price = Decimal(str(btc_data.get('avg_buy_price', '0')))
+            
+            # 총 수량 (가능 수량 + 거래중 수량)
+            total_quantity = balance + locked
+            
+            # 총 투자금액
+            total_investment = total_quantity * avg_buy_price
+            
+            # KRW 잔고 찾기
+            krw_data = next((item for item in account_info 
+                           if item.get('currency') == 'KRW'), None)
+            
+            # 투자 비율 계산
+            if krw_data:
+                krw_balance = Decimal(str(krw_data.get('balance', '0')))
+                total_assets = krw_balance + total_investment
+                investment_ratio = (total_investment / total_assets * 100) if total_assets > 0 else Decimal('0')
+            else:
+                investment_ratio = Decimal('0')
+            
+            return {
+                'avg_price': float(avg_buy_price),
+                'total_quantity': float(total_quantity),
+                'total_investment': float(total_investment),
+                'investment_ratio': float(investment_ratio)
+            }
+                    
+        except Exception as e:
+            print(f"포지션 정보 조회 중 오류 발생: {str(e)}")
+            return {
+                'avg_price': 0,
+                'total_quantity': 0,
+                'total_investment': 0,
+                'investment_ratio': 0
+            }
 
     def execute_trade(self, decision: Dict[str, Any], max_investment: float, current_price: float) -> Dict:
         """거래 결정 실행"""
@@ -198,14 +277,11 @@ class BithumbTradeExecutor:
                     elif '관망' in line:
                         return 'HOLD'
                     
-                    # 디버깅을 위한 출력
                     print(f"파싱된 결정 라인: {line}")
             
-            # 디버깅을 위한 전체 텍스트 출력
             print(f"전체 결정 텍스트:\n{decision_text}")
-            
-            # 결정을 찾지 못한 경우
             return 'HOLD'
+            
         except Exception as e:
             print(f"결정 파싱 중 오류: {str(e)}")
             return 'HOLD'
@@ -237,60 +313,60 @@ class BithumbTradeExecutor:
             return 0.5
 
     def _place_buy_order(self, investment_amount: Decimal, price: Decimal) -> Dict:
-        """매수 주문 실행"""
-        try:
-            # 1. 수량 계산 - 투자금액을 현재가로 나누어 구매 가능한 수량 계산
-            quantity = (investment_amount / price).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)
-            
-            print(f"투자 계산 정보:")
-            print(f"- 투자금액: {float(investment_amount):,.0f}원")
-            print(f"- 현재가: {float(price):,.0f}원")
-            print(f"- 계산된 수량: {float(quantity):.8f} BTC")
-            
-            # 2. 최소 거래량 확인
-            if quantity < self.min_trade_amounts['BTC']:
+            """매수 주문 실행"""
+            try:
+                # 1. 수량 계산 - 투자금액을 현재가로 나누어 구매 가능한 수량 계산
+                quantity = (investment_amount / price).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)
+                
+                print(f"투자 계산 정보:")
+                print(f"- 투자금액: {float(investment_amount):,.0f}원")
+                print(f"- 현재가: {float(price):,.0f}원")
+                print(f"- 계산된 수량: {float(quantity):.8f} BTC")
+                
+                # 2. 최소 거래량 확인
+                if quantity < self.min_trade_amounts['BTC']:
+                    return {
+                        'status': 'ERROR',
+                        'type': 'BUY_FAIL',
+                        'message': f'주문 수량({float(quantity):.8f})이 최소 거래량({self.min_trade_amounts["BTC"]})보다 작습니다',
+                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+
+                # 3. 주문 파라미터 설정
+                params = {
+                    'order_currency': self.symbol,
+                    'payment_currency': 'KRW',
+                    'units': str(quantity),
+                    'price': str(price),
+                    'type': 'bid'
+                }
+
+                # 4. API 요청 실행
+                response = self._send_request("/trade/place", params)
+                
+                # 5. 응답 처리
+                if response['status'] != '0000':
+                    raise Exception(f"매수 주문 실패: {response.get('message')}")
+
+                # 6. 성공 결과 반환
                 return {
-                    'status': 'ERROR',
-                    'type': 'BUY_FAIL',
-                    'message': f'주문 수량({float(quantity):.8f})이 최소 거래량({self.min_trade_amounts["BTC"]})보다 작습니다',
+                    'status': 'SUCCESS',
+                    'type': 'BUY',
+                    'order_id': response['order_id'],
+                    'quantity': float(quantity),
+                    'price': float(price),
+                    'total_amount': float(quantity * price),
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
 
-            # 3. 주문 파라미터 설정
-            params = {
-                'order_currency': self.symbol,
-                'payment_currency': 'KRW',
-                'units': str(quantity),
-                'price': str(price),
-                'type': 'bid'
-            }
-
-            # 4. API 요청 실행
-            response = self._send_request("/trade/place", params)
-            
-            # 5. 응답 처리
-            if response['status'] != '0000':
-                raise Exception(f"매수 주문 실패: {response.get('message')}")
-
-            # 6. 성공 결과 반환
-            return {
-                'status': 'SUCCESS',
-                'type': 'BUY',
-                'order_id': response['order_id'],
-                'quantity': float(quantity),
-                'price': float(price),
-                'total_amount': float(quantity * price),
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-
-        except Exception as e:
-            print(f"매수 주문 실행 중 오류: {str(e)}")
-            return {
-                'status': 'ERROR',
-                'type': 'BUY_FAIL',
-                'message': str(e),
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
+            except Exception as e:
+                print(f"매수 주문 실행 중 오류: {str(e)}")
+                return {
+                    'status': 'ERROR',
+                    'type': 'BUY_FAIL',
+                    'message': str(e),
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
 
     def _place_sell_order(self, quantity: Decimal, price: Decimal) -> Dict:
         """매도 주문 실행"""
@@ -338,64 +414,6 @@ class BithumbTradeExecutor:
                 'type': 'SELL_FAIL',
                 'message': str(e),
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-        
-    def get_current_position(self) -> Dict[str, Any]:
-        """현재 매수 포지션의 평균 매수가와 수량을 조회하고 잔고와 비교"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                # 모든 BUY 거래 조회
-                query = """
-                SELECT quantity, price, total_amount
-                FROM trade_executions
-                WHERE trade_type = 'BUY'
-                ORDER BY timestamp DESC
-                """
-                
-                cursor.execute(query)
-                trades = cursor.fetchall()
-                
-                if not trades:
-                    return {
-                        'avg_price': 0,
-                        'total_quantity': 0,
-                        'total_investment': 0,
-                        'investment_ratio': 0
-                    }
-                
-                # 평균 매수가 및 총 수량 계산
-                total_quantity = sum(Decimal(str(trade[0])) for trade in trades)
-                total_investment = sum(Decimal(str(trade[2])) for trade in trades)
-                
-                if total_quantity > 0:
-                    avg_price = total_investment / total_quantity
-                else:
-                    avg_price = Decimal('0')
-                
-                # 현재 잔고 조회
-                balance = self.get_balance()
-                krw_total = Decimal(str(balance['krw_total']))
-                
-                # 투자 비율 계산 (총 투자금액 / 총 자산)
-                total_assets = krw_total + total_investment
-                investment_ratio = (total_investment / total_assets * 100) if total_assets > 0 else Decimal('0')
-                
-                return {
-                    'avg_price': float(avg_price),
-                    'total_quantity': float(total_quantity),
-                    'total_investment': float(total_investment),
-                    'investment_ratio': float(investment_ratio)
-                }
-                    
-        except Exception as e:
-            print(f"포지션 정보 조회 중 오류 발생: {str(e)}")
-            return {
-                'avg_price': 0,
-                'total_quantity': 0,
-                'total_investment': 0,
-                'investment_ratio': 0
             }
 
     def _get_current_price(self) -> float:

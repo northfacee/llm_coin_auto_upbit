@@ -438,7 +438,7 @@ def main():
     if 'refresh_interval' not in st.session_state:
         st.session_state.refresh_interval = 30
     if 'candle_interval' not in st.session_state:
-        st.session_state.candle_interval = '5m'
+        st.session_state.candle_interval = '1m'
     if 'candle_count' not in st.session_state:
         st.session_state.candle_count = 100
 
