@@ -321,13 +321,10 @@ def price_analysis_agent(state: AgentState) -> AgentState:
                   MA10: {data['MA']['MA10']}
                   MA20: {data['MA']['MA20']}
                   MA50: {data['MA']['MA50']}
-                  MA200: {data['MA']['MA200']}
                 - EMA:
                   EMA12: {data['EMA']['EMA12']}
                   EMA26: {data['EMA']['EMA26']}
-                - DMI: +DI={data['DMI']['+DI']}, -DI={data['DMI']['-DI']}, ADX={data['DMI']['ADX']}
                 - ATR: {data['ATR']}
-                - OBV: {data['OBV']}
                 - VWAP: {data['VWAP']}
                 - MFI: {data['MFI']}
                 - Williams %R: {data['Williams_R']}
