@@ -397,7 +397,6 @@ def display_analysis_results(latest_analysis, all_analysis):
         # Final Decision 탭
         with analysis_tabs[0]:
             if final_analysis is not None:
-                #st.markdown("### Final Trading Decision")
                 st.markdown(f"**Timestamp:** {final_analysis['timestamp']}")
                 st.text_area("Analysis", final_analysis['analysis_text'], height=300, key="final_decision")
             else:
@@ -406,7 +405,6 @@ def display_analysis_results(latest_analysis, all_analysis):
         # Price Analysis 탭
         with analysis_tabs[1]:
             if price_analysis is not None:
-                #st.markdown("### Technical Analysis")
                 st.markdown(f"**Timestamp:** {price_analysis['timestamp']}")
                 st.text_area("Analysis", price_analysis['analysis_text'], height=300, key="price_analysis")
             else:
@@ -415,15 +413,18 @@ def display_analysis_results(latest_analysis, all_analysis):
         # News Analysis 탭
         with analysis_tabs[2]:
             if news_analysis is not None:
-                #st.markdown("### News Analysis")
                 st.markdown(f"**Timestamp:** {news_analysis['timestamp']}")
                 st.text_area("Analysis", news_analysis['analysis_text'], height=300, key="news_analysis")
             else:
                 st.info("No news analysis available.")
     
-    # Analysis History 표시
-    st.header("Analysis History")
-    for _, row in all_analysis.iterrows():
+    # Analysis History 표시 (최근 5개만)
+    st.header("Analysis History (최근 5개)")
+    
+    # timestamp를 기준으로 정렬하고 최근 5개만 선택
+    recent_analysis = all_analysis.sort_values('timestamp', ascending=False).head(15)
+    
+    for _, row in recent_analysis.iterrows():
         with st.expander(f"{row['analysis_type']} Analysis - {row['timestamp']}"):
             if pd.notnull(row['current_price']):
                 st.markdown(f"**Current Price:** ₩{row['current_price']:,}")
