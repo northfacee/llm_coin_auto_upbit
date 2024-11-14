@@ -157,8 +157,8 @@ def news_analysis_agent(state: AgentState) -> AgentState:
         {news_data}
         
         다음 형식으로 상세한 분석 결과를 제공해주세요:
-        1. 투자 결정: (매수/매도/관망)
-        2. 투자 비중: (0-100%)
+        1. 투자결정: (매수/매도/관망)
+        2. 투자비중: (0-100%)
         3. 결정 이유:
            - 주요 영향 뉴스 (영향력 순위별)
            - 예상되는 시장 반응
@@ -335,10 +335,9 @@ def price_analysis_agent(state: AgentState) -> AgentState:
                 - 변동률: {data['Change_Rate']}%
                 """
             
-            prompt += f"""당신은 암호화폐 기술적 분석의 최고 전문가입니다.
-            스캘핑과 데이트레이딩에 특화된 단기 매매 전략을 제시해주세요.
+            prompt += f"""
 
-            시장 분석 기준:
+            [시장 분석 기준]
             1. 추세 강도 판단
                - 이동평균선 배열
                - 추세선 저항/지지
@@ -361,9 +360,9 @@ def price_analysis_agent(state: AgentState) -> AgentState:
             
             다음 형식으로 분석 결과를 제공해주세요:
 
-            1. 투자 결정
-               - 매매 방향: (매수/매도/관망)
-               - 투자 비중: (0-100%)
+            1. 투자 판단
+               - 투자결정: (매수/매도/관망)
+               - 투자비중: (0-100%)
                - 목표가/손절가
                - 예상 진입 유지 시간
             
@@ -648,7 +647,7 @@ def run_trading_analysis():
 
 def run_continuous_analysis():
     """30분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
-    WAIT_MINUTES = 1
+    WAIT_MINUTES = 2
     WAIT_SECONDS = WAIT_MINUTES * 60  # 30분을 초로 변환
     
     print("연속 트레이딩 분석 시작...")
