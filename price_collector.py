@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
-import threading
+import os
 from queue import Queue
 import requests
 import time
@@ -45,11 +45,12 @@ class BithumbTrader:
         self.base_url = "https://api.bithumb.com"
         self.headers = {"accept": "application/json"}
         self.analyzer = MarketDataAnalyzer()
+        self.symbol = os.getenv('COIN', 'BTC')
 
-    def get_current_price(self, symbol: str = "BTC") -> Optional[Dict]:
+    def get_current_price(self) -> Optional[Dict]:
         """현재가 정보 조회"""
         try:
-            url = f"{self.base_url}/public/ticker/{symbol}_KRW"
+            url = f"{self.base_url}/public/ticker/{self.symbol}_KRW"
             print(f"요청 URL: {url}")
             
             response = requests.get(url, headers=self.headers)  
@@ -111,14 +112,14 @@ class BithumbTrader:
             return 0.0
         return ((current_price - comparison_price) / comparison_price) * 100
 
-    def run_trading_bot(self, market: str = "BTC", interval: int = 60):
+    def run_trading_bot(self, interval: int = 60):
         """데이터 수집 봇 실행"""
-        print(f"데이터 수집 및 시작 - {market}")
+        print(f"데이터 수집 시작 - {self.symbol}")
         print(f"수집 간격: {interval}초")
         
         while True:
             try:
-                market_data = self.collect_market_data(market)
+                market_data = self.collect_market_data()
                 if market_data:
                     print(f"\n{market_data['timestamp']} - 데이터 수집 및 분석 완료")
                     print(f"현재가: {market_data['current_price']:,.0f} KRW")
@@ -192,10 +193,10 @@ class BithumbTrader:
                 print("1분 후 재시도")
                 time.sleep(60)
 
-    def collect_market_data(self, market: str = "BTC") -> Dict:
+    def collect_market_data(self) -> Dict:
         try:
             # 현재가 정보 조회
-            current_price_data = self.get_current_price(market)
+            current_price_data = self.get_current_price()
             if not current_price_data:
                 return None
                 
@@ -208,7 +209,7 @@ class BithumbTrader:
             # 분봉 데이터 수집 (1분~60분)
             for unit in [1, 3, 5, 10, 15, 30, 60]:
                 try:
-                    data = self.get_minute_candles(market, unit, count=200)
+                    data = self.get_minute_candles(self.symbol, unit, count=200)
                     
                     if data and len(data) > 0:
                         data = sorted(data, key=lambda x: x['timestamp'], reverse=True)
@@ -270,7 +271,7 @@ class BithumbTrader:
             # 최종 데이터 구조화
             market_data = {
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'market': f"{market}_KRW",
+                'market': f"{self.symbol}_KRW",
                 'current_price': current_price,
                 'analysis': analysis_results
             }
@@ -283,4 +284,4 @@ class BithumbTrader:
 
 if __name__ == "__main__":
     trader = BithumbTrader()
-    trader.run_trading_bot(market="BTC", interval=30)
+    trader.run_trading_bot(interval=60)

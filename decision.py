@@ -16,6 +16,7 @@ from news_collector import NaverNewsCollector
 from trading import BithumbTradeExecutor
 import time
 import traceback  # traceback 모듈 추가
+import requests
 
 # 환경 변수 및 LangSmith 설정
 load_dotenv()
@@ -23,6 +24,10 @@ try:
     INVESTMENT = float(os.getenv('INVESTMENT'))
 except TypeError:
     raise ValueError("INVESTMENT 환경변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
+
+SYMBOL = os.getenv('COIN')
+if not SYMBOL:
+    raise ValueError("COIN 환경변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
 
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
@@ -36,6 +41,7 @@ class AgentState(TypedDict):
     next_step: str
     results: dict
     market_data: dict
+    symbol: str
 
 # 글로벌 인스턴스 초기화
 db_manager = DatabaseManager()
@@ -87,52 +93,15 @@ def get_market_data_once(state: AgentState) -> dict:
                     'min_price': float(current_price_value)
                 }
         
-        # analysis 구조 확인 및 수정
-        if 'analysis' in market_data:
-            for period in ['5m', '10m', '30m', '60m', '240m', '24h']:
-                if period in market_data['analysis']:
-                    period_data = market_data['analysis'][period]
-                    if not isinstance(period_data, dict):
-                        market_data['analysis'][period] = {}
-                    
-                    if 'moving_averages' not in market_data['analysis'][period] or \
-                       not isinstance(market_data['analysis'][period]['moving_averages'], dict):
-                        market_data['analysis'][period]['moving_averages'] = {
-                            '5': 'N/A',
-                            '10': 'N/A',
-                            '20': 'N/A',
-                            '50': 'N/A',
-                            '200': 'N/A'
-                        }
-        
         state['market_data'] = market_data
         return market_data
         
     except Exception as e:
         print(f"Error in get_market_data_once: {str(e)}")
-        # 기본 구조 반환
         return {
             'timestamp': datetime.now().isoformat(),
-            'market': 'BTC_KRW',
-            'current_price': {'closing_price': 0},
-            'analysis': {
-                '30m': {
-                    'moving_averages': {'5': 'N/A', '10': 'N/A', '20': 'N/A', '50': 'N/A', '200': 'N/A'},
-                    'rsi': 'N/A',
-                    'stochastic': ['N/A', 'N/A'],
-                    'bollinger_bands': ['N/A', 'N/A', 'N/A'],
-                    'ema': {'12': 'N/A', '26': 'N/A'},
-                    'wma': {'20': 'N/A'},
-                    'dmi': ['N/A', 'N/A', 'N/A'],
-                    'atr': 'N/A',
-                    'obv': 'N/A',
-                    'vwap': 'N/A',
-                    'mfi': 'N/A',
-                    'williams_r': 'N/A',
-                    'cci': 'N/A',
-                    'change_rate': 'N/A'
-                }
-            }
+            'market': f'{SYMBOL}_KRW',
+            'current_price': {'closing_price': 0}
         }
 
 @tool
@@ -248,7 +217,7 @@ def price_analysis_agent(state: AgentState) -> AgentState:
         
         try:
             # 모든 시간대의 분석 데이터 가져오기
-            time_periods = ['1m', '3m', '5m', '10m', '15m', '30m', '60m']
+            time_periods = ['1m', '3m', '5m', '10m', '15m', '30m']
             analysis_data = {}
             
             for period in time_periods:
@@ -313,7 +282,6 @@ def price_analysis_agent(state: AgentState) -> AgentState:
             10분: {analysis_by_period['10m']['Change_Rate']}%
             15분: {analysis_by_period['15m']['Change_Rate']}%
             30분: {analysis_by_period['30m']['Change_Rate']}%
-            1시간: {analysis_by_period['60m']['Change_Rate']}%
             """
             
             # 각 시간대별 데이터를 프롬프트에 추가
@@ -325,7 +293,6 @@ def price_analysis_agent(state: AgentState) -> AgentState:
                     '10m': '10분',
                     '15m': '15분',
                     '30m': '30분',
-                    '60m': '1시간',
                 }[period]
                 
                 data = analysis_by_period[period]
@@ -371,7 +338,6 @@ def price_analysis_agent(state: AgentState) -> AgentState:
             5. 시간대별 분석:
                - 초단기(1분-5분)
                - 단기(10분-30분)
-               - 중기(1시간)
             """
             
             response = llm.invoke(prompt)
@@ -396,9 +362,8 @@ def price_analysis_agent(state: AgentState) -> AgentState:
             }
         
         return state
-
+    
 def final_decision_agent(state: AgentState) -> AgentState:
-    """뉴스 분석과 기술적 분석을 종합하여 최종 투자 결정을 내리는 에이전트"""
     with langsmith.trace(
         name="final_decision_agent",
         project_name="bitcoin_agent",
@@ -413,7 +378,6 @@ def final_decision_agent(state: AgentState) -> AgentState:
         market_data = get_market_data_once(state)
         current_price = 0
         
-        # 현재가 안전하게 추출
         try:
             if isinstance(market_data.get('current_price'), (int, float)):
                 current_price = market_data['current_price']
@@ -425,69 +389,59 @@ def final_decision_agent(state: AgentState) -> AgentState:
         except Exception as e:
             print(f"Error extracting current price: {e}")
 
-        # 포지션 정보 가져오기
         try:
             position = trade_executor.get_current_position()
             avg_price = position.get('avg_price', 0)
             quantity = position.get('total_quantity', 0)
             investment = position.get('total_investment', 0)
-            ratio = position.get('investment_ratio', 0)
             
-            # 수익률 계산
             profit_rate = ((current_price - avg_price) / avg_price * 100) if avg_price > 0 else 0
             
             position_text = f"""현재 보유 포지션:
             - 평균 매수가: {avg_price:,.0f}원
             - 현재 수익률: {profit_rate:.2f}%
             - 총 투자금액: {investment:,.0f}원
-            - 보유 수량: {quantity:.8f} BTC
-            """
+            - 보유 수량: {quantity:.8f} {SYMBOL}"""
 
         except Exception as e:
             print(f"포지션 정보 조회 실패: {e}")
             position_text = "현재 보유 중인 포지션이 없습니다."
 
         prompt = f"""
-            당신은 암호화폐 투자 전문가이자 리스크 관리자입니다.
-            시장상황을 보고 적극적으로 매도/매수해도 됩니다.
-            특히 스캘핑과 데이트레이딩 관점에서 단기 수익 기회를 포착하는데 집중합니다.
+                당신은 암호화폐 투자 전문가이자 리스크 관리자입니다.
+                스캘핑과 데이트레이딩 관점에서 단기 수익 기회를 포착하는데 집중합니다.
 
-            다음 정보들을 종합적으로 분석하고, 반드시 아래 가중치를 적용하여 신중하게 최종 결정을 내려주세요:
+                주요 투자 원칙:
+                - 수익률이 +1% 초과 또는 -1% 초과 시 즉시 전량 매도
+                - 투자 비중은 0-30% 범위로 제한
+                - 투자 결정 가중치: 가격 분석 85%, 뉴스 분석 15%
 
-            투자 결정 가중치:
-            - 가격 분석 결과: 85% 반영
-            - 뉴스 분석 결과: 15% 반영
+                시장 현황:
+                현재가: {current_price:,.0f}원
 
-            시장 현황
-            현재가: {current_price:,.0f}원
+                포지션 분석:
+                {position_text}
 
-            포지션 분석
-            {position_text}
+                시장 분석:
+                [뉴스 분석]
+                {state['results']['news_analysis']['analysis']}
 
-            시장 분석
-            [뉴스 분석]
-            {state['results']['news_analysis']['analysis']}
+                [기술적 분석]
+                {state['results']['price_analysis']['analysis']}
 
-            [기술적 분석]
-            {state['results']['price_analysis']['analysis']}
+                다음 항목에 대해 분석해주세요:
 
-            투자 결정 요청
-            다음 항목들을 상세히 분석하여 답변해주세요:
+                1. 투자 판단
+                - 결정: [매수/매도/관망] 중 하나만 선택
+                - 비중: 0-30% 내에서 제시
 
-            매우 중요 : 수익률이 +1%가 넘어가거나 -1%가 넘어가면 전량 매도하세요.
+                2. 포지션 분석
+                - 현재 수익률 평가
+                - 리스크 분석
+                - 포지션 조정 전략
 
-            1. 신규 투자 판단
-            투자 결정: (매도/매수/관망) 중 하나만 선택
-            투자 비중: (0-70%)
-            중요: 투자 비중 결정은 반드시 0-70% 사이로 제한됩니다.
-
-            2. 포지션 조정 전략
-            현재 포지션 평가:
-            - 수익률 적정성
-            - 리스크 노출도
-
-            결론:
-            시장 상황 종합과 최종 투자 판단을 간단히 서술해주세요."""
+                3. 결론
+                시장 상황과 최종 투자 판단을 간단히 서술"""
 
         response = llm.invoke(prompt)
         timestamp = datetime.now()
@@ -512,7 +466,6 @@ def execute_trading_decision(state: AgentState) -> None:
             print("최종 결정이 없어 거래를 실행할 수 없습니다.")
             return
 
-        trade_executor = BithumbTradeExecutor()
         timestamp = datetime.now()
         
         try:
@@ -582,6 +535,14 @@ def execute_trading_decision(state: AgentState) -> None:
 def create_trading_workflow() -> Graph:
     """트레이딩 워크플로우 생성"""
     workflow = StateGraph(AgentState)
+
+    initial_state = {
+        "messages": [], 
+        "next_step": "news_analysis",
+        "results": {},
+        "market_data": {},
+        "symbol": SYMBOL
+    }
     
     # 노드 추가
     workflow.add_node("news_analysis", news_analysis_agent)
@@ -642,7 +603,7 @@ def run_trading_analysis():
 
 def run_continuous_analysis():
     """30분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
-    WAIT_MINUTES = 3
+    WAIT_MINUTES = 1
     WAIT_SECONDS = WAIT_MINUTES * 60  # 30분을 초로 변환
     
     print("연속 트레이딩 분석 시작...")

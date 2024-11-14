@@ -24,17 +24,28 @@ class BithumbTradeExecutor:
         self.api_secret = os.getenv('BITHUMB_API_SECRET').encode('utf-8')
         self.api_key_v2 = os.getenv('BITHUMB_API_KEY_V2')
         self.api_secret_v2 = os.getenv('BITHUMB_API_SECRET_V2')
-        self.symbol = "BTC"
+        
+        # COIN 환경변수에서 코인 심볼 가져오기, 기본값은 BTC
+        self.symbol = os.getenv('COIN', 'BTC')
         self.db_path = "crypto_analysis.db"
 
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials not found in environment variables")
         
+        # 코인별 최소 거래량 설정
         self.min_trade_amounts = {
             'BTC': Decimal('0.0001'),
-            'ETH': Decimal('0.001'),
-            'XRP': Decimal('1'),
+            'XRP': Decimal('5'),
+            'DOGE': Decimal('9'),
+            # 필요한 코인 추가
         }
+        
+        # 기본 최소 거래량 설정 (목록에 없는 코인용)
+        self.default_min_trade_amount = Decimal('1')
+    
+    def get_min_trade_amount(self) -> Decimal:
+        """현재 설정된 코인의 최소 거래량 반환"""
+        return self.min_trade_amounts.get(self.symbol, self.default_min_trade_amount)
 
     def _create_signature(self, endpoint: str, params: dict) -> dict:
         """API 요청 서명 및 헤더 생성"""
@@ -105,37 +116,54 @@ class BithumbTradeExecutor:
             params = {
                 'currency': self.symbol
             }
+            
+            #print("잔고 조회 요청 시작...")
+            #print(f"요청 파라미터: {params}")
+            
             response = self._send_request("/info/balance", params)
+            #print(f"API 응답: {response}")
             
             if response.get('status') != '0000':
                 raise Exception(f"잔고 조회 실패: {response.get('message')}")
             
             data = response.get('data', {})
-            return {
+            symbol = self.symbol.lower()
+            
+            # API 응답에서 올바른 키 찾기
+            available_coin_key = f'available_{symbol}'
+            total_coin_key = f'total_{symbol}'
+            
+            result = {
                 'krw_available': Decimal(str(data.get('available_krw', '0'))),
-                'btc_available': Decimal(str(data.get('available_btc', '0'))),
+                f'{symbol}_available': Decimal(str(data.get(available_coin_key, '0'))),
                 'krw_total': Decimal(str(data.get('total_krw', '0'))),
-                'btc_total': Decimal(str(data.get('total_btc', '0')))
+                f'{symbol}_total': Decimal(str(data.get(total_coin_key, '0')))
             }
+            
+            #print(f"변환된 잔고 정보: {result}")
+            return result
+            
         except Exception as e:
             print(f"잔고 조회 중 오류 발생: {str(e)}")
+            print("상세 오류:", traceback.format_exc())
             return {
                 'krw_available': Decimal('0'),
-                'btc_available': Decimal('0'),
+                f'{self.symbol.lower()}_available': Decimal('0'),
                 'krw_total': Decimal('0'),
-                'btc_total': Decimal('0')
+                f'{self.symbol.lower()}_total': Decimal('0')
             }
 
     def get_current_position(self) -> Dict[str, Any]:
         """현재 포지션 정보 조회"""
         try:
             account_info = self.get_account_info()
+            symbol = self.symbol
             
-            # BTC 데이터 찾기
-            btc_data = next((item for item in account_info 
-                           if item.get('currency') == 'BTC'), None)
+            # 코인 데이터 찾기
+            coin_data = next((item for item in account_info 
+                        if item.get('currency') == symbol), None)
             
-            if not btc_data:
+            if not coin_data:
                 return {
                     'avg_price': 0,
                     'total_quantity': 0,
@@ -144,9 +172,9 @@ class BithumbTradeExecutor:
                 }
             
             # 데이터 추출
-            balance = Decimal(str(btc_data.get('balance', '0')))
-            locked = Decimal(str(btc_data.get('locked', '0')))
-            avg_buy_price = Decimal(str(btc_data.get('avg_buy_price', '0')))
+            balance = Decimal(str(coin_data.get('balance', '0')))
+            locked = Decimal(str(coin_data.get('locked', '0')))
+            avg_buy_price = Decimal(str(coin_data.get('avg_buy_price', '0')))
             
             # 총 수량 (가능 수량 + 거래중 수량)
             total_quantity = balance + locked
@@ -156,7 +184,7 @@ class BithumbTradeExecutor:
             
             # KRW 잔고 찾기
             krw_data = next((item for item in account_info 
-                           if item.get('currency') == 'KRW'), None)
+                        if item.get('currency') == 'KRW'), None)
             
             # 투자 비율 계산
             if krw_data:
@@ -202,8 +230,9 @@ class BithumbTradeExecutor:
 
             # 3. 잔고 확인
             balance = self.get_balance()
+            symbol = self.symbol.lower()
             available_krw = Decimal(str(balance['krw_available']))
-            available_btc = Decimal(str(balance['btc_available']))
+            available_coin = Decimal(str(balance[f'{symbol}_available']))
 
             # 4. 투자 비중 계산 및 로깅
             investment_ratio = self._parse_investment_ratio(decision_text)
@@ -234,16 +263,16 @@ class BithumbTradeExecutor:
 
             elif trade_type == 'SELL':
                 # 매도 가능 수량 확인
-                if available_btc < self.min_trade_amounts['BTC']:
+                if available_coin < self.get_min_trade_amount():
                     return {
                         'status': 'ERROR',
                         'type': 'SELL_FAIL',
-                        'message': f'BTC 잔액 부족 (현재 보유량: {float(available_btc):.8f} BTC)',
+                        'message': f'{self.symbol} 잔액 부족 (현재 보유량: {float(available_coin):.8f} {self.symbol})',
                         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                     }
                 
                 # 매도 수량 계산 (전체 보유량의 investment_ratio 만큼)
-                sell_quantity = available_btc * Decimal(str(investment_ratio))
+                sell_quantity = available_coin * Decimal(str(investment_ratio))
                 return self._place_sell_order(sell_quantity, Decimal(str(current_price)))
 
             return {
@@ -313,70 +342,72 @@ class BithumbTradeExecutor:
             return 0.5
 
     def _place_buy_order(self, investment_amount: Decimal, price: Decimal) -> Dict:
-            """매수 주문 실행"""
-            try:
-                # 1. 수량 계산 - 투자금액을 현재가로 나누어 구매 가능한 수량 계산
-                quantity = (investment_amount / price).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)
-                
-                print(f"투자 계산 정보:")
-                print(f"- 투자금액: {float(investment_amount):,.0f}원")
-                print(f"- 현재가: {float(price):,.0f}원")
-                print(f"- 계산된 수량: {float(quantity):.8f} BTC")
-                
-                # 2. 최소 거래량 확인
-                if quantity < self.min_trade_amounts['BTC']:
-                    return {
-                        'status': 'ERROR',
-                        'type': 'BUY_FAIL',
-                        'message': f'주문 수량({float(quantity):.8f})이 최소 거래량({self.min_trade_amounts["BTC"]})보다 작습니다',
-                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-
-                # 3. 주문 파라미터 설정
-                params = {
-                    'order_currency': self.symbol,
-                    'payment_currency': 'KRW',
-                    'units': str(quantity),
-                    'price': str(price),
-                    'type': 'bid'
-                }
-
-                # 4. API 요청 실행
-                response = self._send_request("/trade/place", params)
-                
-                # 5. 응답 처리
-                if response['status'] != '0000':
-                    raise Exception(f"매수 주문 실패: {response.get('message')}")
-
-                # 6. 성공 결과 반환
-                return {
-                    'status': 'SUCCESS',
-                    'type': 'BUY',
-                    'order_id': response['order_id'],
-                    'quantity': float(quantity),
-                    'price': float(price),
-                    'total_amount': float(quantity * price),
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-
-            except Exception as e:
-                print(f"매수 주문 실행 중 오류: {str(e)}")
+        """매수 주문 실행"""
+        try:
+            # 1. 수량 계산 - 투자금액을 현재가로 나누어 구매 가능한 수량 계산
+            quantity = (investment_amount / price).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)
+            
+            print(f"투자 계산 정보:")
+            print(f"- 투자금액: {float(investment_amount):,.0f}원")
+            print(f"- 현재가: {float(price):,.0f}원")
+            print(f"- 계산된 수량: {float(quantity):.8f} {self.symbol}")
+            
+            # 2. 최소 거래량 확인
+            min_trade_amount = self.get_min_trade_amount()
+            if quantity < min_trade_amount:
                 return {
                     'status': 'ERROR',
                     'type': 'BUY_FAIL',
-                    'message': str(e),
+                    'message': f'주문 수량({float(quantity):.8f})이 최소 거래량({float(min_trade_amount)})보다 작습니다',
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
+
+            # 3. 주문 파라미터 설정
+            params = {
+                'order_currency': self.symbol,
+                'payment_currency': 'KRW',
+                'units': str(quantity),
+                'price': str(price),
+                'type': 'bid'
+            }
+
+            # 4. API 요청 실행
+            response = self._send_request("/trade/place", params)
+            
+            # 5. 응답 처리
+            if response['status'] != '0000':
+                raise Exception(f"매수 주문 실패: {response.get('message')}")
+
+            # 6. 성공 결과 반환
+            return {
+                'status': 'SUCCESS',
+                'type': 'BUY',
+                'order_id': response['order_id'],
+                'quantity': float(quantity),
+                'price': float(price),
+                'total_amount': float(quantity * price),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+
+        except Exception as e:
+            print(f"매수 주문 실행 중 오류: {str(e)}")
+            return {
+                'status': 'ERROR',
+                'type': 'BUY_FAIL',
+                'message': str(e),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
 
     def _place_sell_order(self, quantity: Decimal, price: Decimal) -> Dict:
         """매도 주문 실행"""
         try:
             # 1. 최소 거래량 확인
-            if quantity < self.min_trade_amounts['BTC']:
+            min_trade_amount = self.get_min_trade_amount()
+            if quantity < min_trade_amount:
                 return {
                     'status': 'ERROR',
                     'type': 'SELL_FAIL',
-                    'message': f'주문 수량이 최소 거래량({self.min_trade_amounts["BTC"]})보다 작습니다',
+                    'message': f'주문 수량({float(quantity):.8f})이 최소 거래량({float(min_trade_amount)})보다 작습니다',
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
 
@@ -414,6 +445,62 @@ class BithumbTradeExecutor:
                 'type': 'SELL_FAIL',
                 'message': str(e),
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        
+    def get_current_position(self) -> Dict[str, Any]:
+        """현재 포지션 정보 조회"""
+        try:
+            account_info = self.get_account_info()
+            
+            # self.symbol 사용 (하드코딩된 'DOGE' 대신)
+            coin_data = next((item for item in account_info 
+                        if item.get('currency') == self.symbol), None)
+            
+            if not coin_data:
+                return {
+                    'avg_price': 0,
+                    'total_quantity': 0,
+                    'total_investment': 0,
+                    'investment_ratio': 0
+                }
+            
+            # 데이터 추출
+            balance = Decimal(str(coin_data.get('balance', '0')))
+            locked = Decimal(str(coin_data.get('locked', '0')))
+            avg_buy_price = Decimal(str(coin_data.get('avg_buy_price', '0')))
+            
+            # 총 수량 (가능 수량 + 거래중 수량)
+            total_quantity = balance + locked
+            
+            # 총 투자금액
+            total_investment = total_quantity * avg_buy_price
+            
+            # KRW 잔고 찾기
+            krw_data = next((item for item in account_info 
+                        if item.get('currency') == 'KRW'), None)
+            
+            # 투자 비율 계산
+            if krw_data:
+                krw_balance = Decimal(str(krw_data.get('balance', '0')))
+                total_assets = krw_balance + total_investment
+                investment_ratio = (total_investment / total_assets * 100) if total_assets > 0 else Decimal('0')
+            else:
+                investment_ratio = Decimal('0')
+            
+            return {
+                'avg_price': float(avg_buy_price),
+                'total_quantity': float(total_quantity),
+                'total_investment': float(total_investment),
+                'investment_ratio': float(investment_ratio)
+            }
+                    
+        except Exception as e:
+            print(f"포지션 정보 조회 중 오류 발생: {str(e)}")
+            return {
+                'avg_price': 0,
+                'total_quantity': 0,
+                'total_investment': 0,
+                'investment_ratio': 0
             }
 
     def _get_current_price(self) -> float:

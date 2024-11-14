@@ -15,58 +15,73 @@ try:
     INVESTMENT = float(os.getenv('INVESTMENT'))
 except TypeError:
     raise ValueError("INVESTMENT 환경변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
+    
+trader = BithumbTradeExecutor()
+balance = trader.get_balance()
+symbol = os.getenv('COIN', 'BTC')
 
 def get_account_balance():
     """계좌 잔고 및 수익률 정보 조회"""
     try:
         trader = BithumbTradeExecutor()
+        symbol = os.getenv('COIN', 'DOGE')
         balance = trader.get_balance()
         
-        # 현재가 조회 (API에서 반환하는 값으로 수정)
-        market_url = "https://api.bithumb.com/public/ticker/BTC_KRW"
+        # 현재가 조회
+        market_url = f"https://api.bithumb.com/public/ticker/{symbol}_KRW"
         market_response = requests.get(market_url).json()
         current_price = float(market_response['data']['closing_price'])
         
-        # 현재 총 자산가치 계산 (BTC 가치 + KRW 잔고)
-        btc_value = float(balance['btc_available']) * current_price
-        total_value = btc_value + float(balance['krw_available'])
+        # 코인 보유량
+        coin_available = float(balance[f'{symbol.lower()}_available'])
+        krw_available = float(balance['krw_available'])
         
-        # 수익률 계산 (전역 변수 INVESTMENT 사용)
+        # 코인 가치 계산 (현재가 * 보유수량)
+        coin_value = coin_available * current_price
+        
+        # 총 자산가치 (코인 가치 + 원화 잔고)
+        total_value = coin_value + krw_available
+        
+        # 수익률 계산
         profit = total_value - INVESTMENT
-        profit_rate = ((total_value - INVESTMENT) / INVESTMENT) * 100
+        profit_rate = ((total_value - INVESTMENT) / INVESTMENT * 100) if INVESTMENT > 0 else 0
         
         return {
-            'total_value': total_value,
-            'profit': profit,
-            'profit_rate': profit_rate,
-            'krw_available': float(balance['krw_available'])
+            'total_value': coin_value + krw_available,  # 총 자산
+            'profit': profit,  # 순수익
+            'profit_rate': profit_rate,  # 수익률
+            'krw_available': krw_available,  # 원화 잔고
+            'coin_available': coin_available,  # 코인 보유량
+            'coin_value': coin_value,  # 코인 가치
+            'current_price': current_price  # 현재가
         }
     except Exception as e:
         print(f"잔고 조회 중 오류 발생: {e}")
         return None
-    
+
 def get_current_position(self) -> dict:
     """현재 포지션 정보 조회"""
     try:
         # 잔고 조회
         balance = self.get_balance()
+        symbol = os.getenv('COIN', 'BTC')  # 환경변수에서 코인 심볼 가져오기
         
         # 현재가 조회
-        market_url = "https://api.bithumb.com/public/ticker/BTC_KRW"
+        market_url = f"https://api.bithumb.com/public/ticker/{symbol}_KRW"
         market_response = requests.get(market_url).json()
         current_price = float(market_response['data']['closing_price'])
         
-        # BTC 가치 및 총 자산가치 계산
-        btc_quantity = float(balance['btc_available'])
-        btc_value = btc_quantity * current_price
-        total_value = btc_value + float(balance['krw_available'])
+        # 코인 가치 및 총 자산가치 계산
+        coin_quantity = float(balance[f'{symbol.lower()}_available'])
+        coin_value = coin_quantity * current_price
+        total_value = coin_value + float(balance['krw_available'])
         
-        # 평균 매수가 계산 (BTC 보유 시)
+        # 평균 매수가 계산 (코인 보유 시)
         avg_price = 0
-        if btc_quantity > 0:
+        if coin_quantity > 0:
             try:
-                investment_per_btc = float(os.getenv('INVESTMENT')) / btc_quantity
-                avg_price = investment_per_btc
+                investment_per_coin = float(os.getenv('INVESTMENT')) / coin_quantity
+                avg_price = investment_per_coin
             except:
                 avg_price = current_price  # 평균 매수가 계산 실패 시 현재가로 대체
         
@@ -80,7 +95,7 @@ def get_current_position(self) -> dict:
             profit_rate = 0
             
         return {
-            'quantity': btc_quantity,
+            'quantity': coin_quantity,
             'avg_price': avg_price,
             'current_price': current_price,
             'total_value': total_value,
@@ -179,7 +194,7 @@ def display_metrics():
 def get_bithumb_candle_data(interval='1m', count=100):
     """빗썸 API에서 실시간 캔들 데이터 조회"""
     try:
-        url = f"https://api.bithumb.com/public/candlestick/BTC_KRW/{interval}"
+        url = f"https://api.bithumb.com/public/candlestick/{trader.symbol}_KRW/{interval}"
         response = requests.get(url)
         data = response.json()
         
@@ -307,7 +322,7 @@ def create_trading_chart(market_df, trade_df):
     # 차트 스타일 설정
     current_price = market_df['closing_price'].iloc[-1]
     fig.update_layout(
-        title=f'현재 비트코인 가격 : ₩{current_price:,.0f}',
+        title=f'현재 {symbol}코인 가격 : ₩{current_price:,.0f}',
         yaxis=dict(
             title='Price (KRW)',
             range=[min_price - price_margin, max_price + price_margin],
@@ -350,11 +365,11 @@ def display_trade_history(trade_df):
     st.dataframe(
         display_df,
         column_config={
-            "timestamp": "Time",
-            "trade_type": "Type",
-            "quantity": "Quantity (BTC)",
-            "price": "Price",
-            "total_amount": "Total Amount",
+            "timestamp": "시간",
+            "trade_type": "매매타입",
+            "quantity": "개수",
+            "price": "가격",
+            "total_amount": "총 구매 가격",
             "order_id": "Order ID"
         },
         hide_index=True
@@ -470,7 +485,7 @@ def main():
         </style>
         """, unsafe_allow_html=True)
     
-    st.title('비트코인 자동매매 모니터링')
+    st.title(f'{symbol} 자동매매 모니터링')
 
     # 데이터베이스 매니저 초기화
     db = DatabaseManager()
