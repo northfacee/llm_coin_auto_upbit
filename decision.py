@@ -144,30 +144,30 @@ def news_analysis_agent(state: AgentState) -> AgentState:
         
         news_data = get_recent_news.invoke("")
         
-        prompt = f"""당신은 암호화폐 시장의 뉴스 분석 전문가입니다.
-        단기 가격 변동에 즉각적 영향을 미칠 수 있는 뉴스에 집중하여 분석해주세요.
+        prompt = f"""You are a cryptocurrency market news analysis expert.
+                    Focus on analyzing news that could have immediate impact on short-term price movements.
 
-        분석 우선순위:
-        1. 규제/정책 관련 뉴스 (영향력 가중치: 35%)
-        2. 기관 투자자 동향 (영향력 가중치: 25%)
-        3. 기술적 발전/업데이트 소식 (영향력 가중치: 20%)
-        4. 시장 심리 관련 뉴스 (영향력 가중치: 20%)
+                    Analysis Priorities:
+                    1. Regulation/Policy Related News (Impact Weight: 35%)
+                    2. Institutional Investor Trends (Impact Weight: 25%)
+                    3. Technical Development/Update News (Impact Weight: 20%)
+                    4. Market Sentiment Related News (Impact Weight: 20%)
 
-        뉴스 데이터:
-        {news_data}
-        
-        다음 형식으로 상세한 분석 결과를 제공해주세요:
-        1. 투자결정: (매수/매도/관망)
-        2. 투자비중: (0-100%)
-        3. 결정 이유:
-           - 주요 영향 뉴스 (영향력 순위별)
-           - 예상되는 시장 반응
-           - 영향 지속 기간 예측
-        4. 리스크 요소:
-           - 단기 리스크
-           - 반대 시나리오 가능성
-        5. 종합 뉴스 영향도: (매우 부정적/-2 ~ 매우 긍정적/+2)
-        """
+                    News Data:
+                    {news_data}
+                    
+                    Please provide detailed analysis in the following format:
+                    1. Investment Decision: (Buy/Sell/Hold)
+                    2. Investment Weight: (0-100%)
+                    3. Decision Rationale:
+                    - Key Influential News (by impact ranking)
+                    - Expected Market Response
+                    - Impact Duration Prediction
+                    4. Risk Factors:
+                    - Short-term Risks
+                    - Counter Scenario Possibilities
+                    5. Overall News Impact Score: (Very Negative/-2 ~ Very Positive/+2)
+                    """
         
         response = llm.invoke(prompt)
         timestamp = datetime.now()
@@ -282,103 +282,95 @@ def price_analysis_agent(state: AgentState) -> AgentState:
                 }
             
             # 프롬프트 구성
-            prompt = f"""당신은 암호화폐 기술적 분석 전문가입니다. 
-            다음 데이터를 기반으로 투자 결정을 내려주세요.
+            prompt = f"""You are a cryptocurrency technical analysis expert.
+            Please make investment decisions based on the following data.
             
-            현재가: {format_number(current_price)}원
+            Current Price: {format_number(current_price)} KRW
             
-            === 각 시간대별 변동률 ===
-            1분: {analysis_by_period['1m']['Change_Rate']}%
-            3분: {analysis_by_period['3m']['Change_Rate']}%
-            5분: {analysis_by_period['5m']['Change_Rate']}%
-            10분: {analysis_by_period['10m']['Change_Rate']}%
-            15분: {analysis_by_period['15m']['Change_Rate']}%
-            30분: {analysis_by_period['30m']['Change_Rate']}%
+            === Price Change Rate by Timeframe ===
+            1min: {analysis_by_period['1m']['Change_Rate']}%
+            3min: {analysis_by_period['3m']['Change_Rate']}%
+            5min: {analysis_by_period['5m']['Change_Rate']}%
+            10min: {analysis_by_period['10m']['Change_Rate']}%
+            15min: {analysis_by_period['15m']['Change_Rate']}%
+            30min: {analysis_by_period['30m']['Change_Rate']}%
             """
             
             # 각 시간대별 데이터를 프롬프트에 추가
             for period in time_periods:
-                period_name = {
-                    '1m': '1분',
-                    '3m': '3분',
-                    '5m': '5분',
-                    '10m': '10분',
-                    '15m': '15분',
-                    '30m': '30분',
-                }[period]
                 
                 data = analysis_by_period[period]
                 prompt += f"""
-                === {period_name} 기준 지표 ===
+                === {period} Indicators ===
                 - RSI(14): {data['RSI']}
                 - Stochastic K/D: {data['Stochastic']['K']}/{data['Stochastic']['D']}
-                - 볼린저 밴드: 
-                  상단: {data['BB']['Upper']}
-                  중간: {data['BB']['Middle']}
-                  하단: {data['BB']['Lower']}
-                - 이동평균선:
-                  MA5: {data['MA']['MA5']}
-                  MA10: {data['MA']['MA10']}
-                  MA20: {data['MA']['MA20']}
-                  MA50: {data['MA']['MA50']}
+                - Bollinger Bands:
+                Upper: {data['BB']['Upper']}
+                Middle: {data['BB']['Middle']}
+                Lower: {data['BB']['Lower']}
+                - Moving Averages:
+                MA5: {data['MA']['MA5']}
+                MA10: {data['MA']['MA10']}
+                MA20: {data['MA']['MA20']}
+                MA50: {data['MA']['MA50']}
                 - EMA:
-                  EMA12: {data['EMA']['EMA12']}
-                  EMA26: {data['EMA']['EMA26']}
+                EMA12: {data['EMA']['EMA12']}
+                EMA26: {data['EMA']['EMA26']}
                 - ATR: {data['ATR']}
                 - VWAP: {data['VWAP']}
                 - MFI: {data['MFI']}
                 - Williams %R: {data['Williams_R']}
                 - CCI: {data['CCI']}
-                - 변동률: {data['Change_Rate']}%
+                - Change Rate: {data['Change_Rate']}%
                 """
             
             prompt += f"""
 
-            [시장 분석 기준]
-            1. 추세 강도 판단
-               - 이동평균선 배열
-               - 추세선 저항/지지
-               - 추세 모멘텀 지속성
+            [Market Analysis Criteria]
+            1. Trend Strength Assessment
+               - Moving Average Alignment
+               - Trendline Support/Resistance
+               - Trend Momentum Sustainability
             
-            2. 단기 반전 신호
-               - RSI, Stochastic 다이버전스
-               - 볼린저 밴드 침투
-               - 거래량 급증 구간
+            2. Short-term Reversal Signals
+               - RSI, Stochastic Divergence
+               - Bollinger Band Penetration
+               - Volume Surge Areas
             
-            3. 매매 시점 정밀도
-               - 15분봉 이하 단기 차트 우선
-               - 복합 지표 확증 신호
-               - 거래량 프로필 기반 가격대 분석
+            3. Trade Entry Precision
+               - Priority on 15min or Lower Timeframes
+               - Multiple Indicator Confirmation Signals
+               - Volume Profile Based Price Analysis
             
-            4. 리스크 관리
-               - 변동성 기반 손절가
-               - 예상 손익비
-               - 포지션 진입 타이밍
+            4. Risk Management
+               - Volatility-based Stop Loss
+               - Expected Risk-Reward Ratio
+               - Position Entry Timing
             
-            다음 형식으로 분석 결과를 제공해주세요:
+            Please provide analysis results in the following format:
 
-            1. 투자 판단
-               - 투자결정: (매수/매도/관망)
-               - 투자비중: (0-100%)
-               - 목표가/손절가
-               - 예상 진입 유지 시간
+            1. Investment Assessment
+               - Decision: (Buy/Sell/Hold)
+               - Investment Weight: (0-100%)
+               - Target/Stop Loss Prices
+               - Expected Position Hold Time
             
-            2. 주요 시그널 분석
-               - 단기(1-5분): 주요 전환점/강도
-               - 중기(10-30분): 추세 방향/강도
-               - 거래량 특이점
-               - 주목할 기술적 패턴
+            2. Key Signal Analysis
+               - Short-term (1-5min): Key Turning Points/Strength
+               - Medium-term (10-30min): Trend Direction/Strength
+               - Volume Anomalies
+               - Notable Technical Patterns
             
-            3. 리스크 평가
-               - 반전 가능성
-               - 변동성 수준
-               - 거래량 리스크
-               - 추천 레버리지 배수
+            3. Risk Assessment
+               - Reversal Probability
+               - Volatility Level
+               - Volume Risk
+               - Recommended Leverage Multiple
             
-            4. 종합 점수: (-5 ~ +5)
-               음수: 하락 가능성
-               양수: 상승 가능성
-               절대값: 신뢰도
+            4. Overall Score: (-5 ~ +5)
+               Negative: Downward Potential
+               Positive: Upward Potential
+               Absolute Value: Confidence Level
             """
             
             response = llm.invoke(prompt)
@@ -449,40 +441,40 @@ def final_decision_agent(state: AgentState) -> AgentState:
             position_text = "현재 보유 중인 포지션이 없습니다."
 
         prompt = f"""
-                당신은 암호화폐 투자 전문가이자 리스크 관리자입니다.
-                스캘핑과 데이트레이딩 관점에서 단기 수익 기회를 포착하는데 집중합니다.
+                You are a cryptocurrency investment expert and risk manager.
+                Focus on capturing short-term profit opportunities from scalping and day trading perspectives.
 
-                주요 투자 원칙:
-                - 수익률이 +1% 초과 또는 -1% 초과 시 즉시 전량 매도
-                - 투자 비중은 0-30% 범위로 제한
-                - 투자 결정 가중치: 가격 분석 85%, 뉴스 분석 15%
+                Key Investment Principles:
+                - Immediate full position exit when profit exceeds +1% or loss exceeds -1%
+                - Investment weight restricted to 0-30% range
+                - Decision weight distribution: Price Analysis 85%, News Analysis 15%
 
-                시장 현황:
-                현재가: {current_price:,.0f}원
+                Market Status:
+                Current Price: {current_price:,.0f} KRW
 
-                포지션 분석:
+                Position Analysis:
                 {position_text}
 
-                시장 분석:
-                [뉴스 분석]
+                Market Analysis:
+                [News Analysis]
                 {state['results']['news_analysis']['analysis']}
 
-                [기술적 분석]
+                [Technical Analysis]
                 {state['results']['price_analysis']['analysis']}
 
-                다음 항목에 대해 분석해주세요:
+                Please analyze the following items:
 
-                1. 투자 판단
-                - 투자결정: [매수/매도/관망] 중 하나만 선택
-                - 투자비중: 0-30% 내에서 제시
+                1. Investment Decision
+                - Decision: Choose one [Buy/Sell/Hold]
+                - Investment Weight: Suggest within 0-30%
 
-                2. 포지션 분석
-                - 현재 수익률 평가
-                - 리스크 분석
-                - 포지션 조정 전략
+                2. Position Analysis
+                - Current Profit/Loss Assessment
+                - Risk Analysis
+                - Position Adjustment Strategy
 
-                3. 결론
-                시장 상황과 최종 투자 판단을 간단히 서술"""
+                3. Conclusion
+                Brief description of market conditions and final investment decision"""
 
         response = llm.invoke(prompt)
         timestamp = datetime.now()
