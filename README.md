@@ -4,7 +4,7 @@
 
 ## 기능
 
-- 실시간 비트코인 시장 데이터 수집
+- 비트코인뿐만 아닌 다양한 코인 매매가능
 - LangSmith를 통한 분석 결과 모니터링
 - Langgraph를 통한 에이전트 (뉴스 에이전트, 가격 에이전트)
 - Streamlit을 통해 매매 모니터링 가능
@@ -13,7 +13,7 @@
 
 1. 크게 뉴스 에이전트, 가격 에이전트, 최종 에이전트 3개가 있습니다.
 2. 뉴스 에이전트의 경우 네이버 api를 사용하여 search_keywords에 키워드들을 넣으면 그 키워드의 뉴스들을 수집하여 이 정보를 토대로 결정합니다.
-3. 가격 에이전트의 경우 빗썸 api를 사용하여 5m, 10m, 30m, 60m의 데이터들을 다양한 지표로 변환하여 이 정보를 토대로 결정합니다.
+3. 가격 에이전트의 경우 빗썸 api를 사용하여 1m, 3m, 5m, 10m, 15m, 30m의 데이터들을 다양한 지표로 변환하여 이 정보를 토대로 결정합니다.
 4. 최종 에이전트는 뉴스, 가격 에이전트의 정보를 종합적으로 판단하여 결정합니다.
 5. 매매내역은 Streamlit을 통해 모니터링 가능합니다.
 
@@ -21,7 +21,7 @@
 
 1. 저장소 클론
 ```bash
-git clone https://github.com/northfacee/test.git
+git clone https://github.com/northfacee/llm_coin_auto.git
 cd test
 ```
 
@@ -52,7 +52,7 @@ BITHUMB_API_KEY_V2=your_bithumb_v2_api_key
 BITHUMB_API_SECRET_V2=your_bithumb_v2_api_secret_key
 
 INVESTMENT= your_initial_money #예시 1000000
-COIN=your_coin #예시 BTC
+COIN=your_coin #예시 BTC, DOGE
 ```
 
 ## 실행 방법
