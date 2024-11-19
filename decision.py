@@ -1,11 +1,10 @@
-from typing import TypedDict, Annotated, Sequence
+from typing import TypedDict, Sequence
 from datetime import datetime, timedelta
 import json
 import os
-from langchain_core.messages import BaseMessage, HumanMessage, FunctionMessage
+from langchain_core.messages import BaseMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import Graph, StateGraph
-from langgraph.prebuilt import ToolExecutor
 from langchain_core.tools import tool
 from langsmith import Client
 import langsmith
@@ -16,7 +15,7 @@ from news_collector import NaverNewsCollector
 from trading import BithumbTradeExecutor
 import time
 import traceback  # traceback 모듈 추가
-import requests
+from pprint import pprint
 
 # 환경 변수 및 LangSmith 설정
 load_dotenv()
@@ -447,55 +446,165 @@ def final_decision_agent(state: AgentState) -> AgentState:
             print(f"포지션 정보 조회 실패: {e}")
             position_text = "현재 보유 중인 포지션이 없습니다."
 
+        try:
+            position = trade_executor.get_current_position()
+            avg_price = position.get('avg_price', 0)
+            quantity = position.get('total_quantity', 0)
+            investment = position.get('total_investment', 0)
+            
+            profit_rate = ((current_price - avg_price) / avg_price * 100) if avg_price > 0 else 0
+            
+            # 수익률이 +1% 초과 또는 -1% 초과인 경우 자동 매도 결정
+            if abs(profit_rate) > 1 and quantity > 0:
+                print(f"수익률 {profit_rate:.2f}%로 임계값(±1%) 초과. 자동 매도 실행.")
+                auto_decision = {
+                    "decision": "SELL",
+                    "percentage": 100,  # 전량 매도
+                    "price_score": 0,
+                    "news_score": 0,
+                    "analysis": {
+                        "market_trend": "NEUTRAL",
+                        "market_status": f"수익률 {profit_rate:.2f}% 도달로 인한 자동 매도",
+                        "risk_level": "LOW"
+                    },
+                    "signals": {
+                        "technical": "NEUTRAL",
+                        "news": "NEUTRAL",
+                        "trend": "SIDEWAYS"
+                    },
+                    "reason": f"수익률 {profit_rate:.2f}%가 임계값(±1%)을 초과하여 자동 매도 실행"
+                }
+                
+                state['results']['final_decision'] = {
+                    'decision': auto_decision,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                return state
+            
+            position_text = f"""현재 보유 포지션:
+            - 평균 매수가: {avg_price:,.0f}원
+            - 현재 수익률: {profit_rate:.2f}%
+            - 총 투자금액: {investment:,.0f}원
+            - 보유 수량: {quantity:.8f} {SYMBOL}"""
+
+        except Exception as e:
+            print(f"포지션 정보 조회 실패: {e}")
+            position_text = "현재 보유 중인 포지션이 없습니다."
+
         prompt = f"""
-                당신은 암호화폐 투자 전문가이자 리스크 관리자입니다.
-                스캘핑과 데이트레이딩 관점에서 단기 수익 기회를 포착하는데 집중합니다.
-                뉴스와 가격을 종합해서 결정해주세요.
+        당신은 암호화폐 투자 전문가이자 리스크 관리자입니다.
+        스캘핑과 데이트레이딩 관점에서 단기 수익 기회를 포착하는데 집중합니다.
+        아래 시장분석에서 뉴스분석과 가격분석을 종합해서 결정해주세요.
 
-                주요 투자 원칙:
-                - 수익률이 +1% 초과 또는 -1% 초과 시 즉시 전량 매도
-                - 투자 비중은 0-30% 범위로 제한
-                - 투자 결정 가중치: 가격 분석 85%, 뉴스 분석 15%
+        [중요 제한사항]
+        - 투자 비중은 반드시 0-30% 범위 내에서만 결정해야 합니다
+        - 30%를 초과하는 투자 비중은 절대 제안하지 마세요
+        - HOLD 결정시 반드시 투자 비중은 0%여야 합니다
 
-                시장 현황:
-                현재가: {current_price:,.0f}원
+        주요 투자 원칙:
+        - 수익률이 +1% 초과 또는 -1% 초과 시 즉시 전량 매도
+        - 투자 비중은 0-30% 범위로 엄격히 제한 (절대 초과 불가)
+        - 투자 결정 가중치: 가격 분석 85%, 뉴스 분석 15%
 
-                포지션 분석:
-                {position_text}
+        시장 현황:
+        현재가: {current_price:,.0f}원
 
-                시장 분석:
-                [뉴스 분석]
-                {state['results']['news_analysis']['analysis']}
+        포지션 분석:
+        {position_text}
 
-                [기술적 분석]
-                {state['results']['price_analysis']['analysis']}
+        시장 분석:
+        [뉴스 분석]
+        {state['results']['news_analysis']['analysis']}
 
-                다음 항목에 대해 분석해주세요:
+        [기술적 분석]
+        {state['results']['price_analysis']['analysis']}
 
-                1. 투자 판단
-                - 투자결정: [매수/매도/관망] 중 하나만 선택
-                - 투자비중: 0-30% 내에서 제시
 
-                2. 포지션 분석
-                - 현재 수익률 평가
-                - 리스크 분석
-                - 포지션 조정 전략
+        아래의 정확한 JSON 형식으로만 결과를 내주세요. 다른 텍스트를 추가하지 마세요:
 
-                3. 결론
-                시장 상황과 최종 투자 판단을 간단히 서술"""
+        {{
+            "decision": "BUY/SELL/HOLD 중 하나만 선택",
+            "percentage": "반드시 0-30 사이의 정수만 가능 (30 초과 절대 불가)",
+            "price_score": -5에서 5 사이의 정수값(음수: 하락예상, 양수: 상승예상, 절대값: 신뢰도),
+            "news_score": -2에서 2 사이의 정수값(음수: 부정적, 양수: 긍정적),
+            "analysis": {{
+                "market_trend": "BULLISH/BEARISH/NEUTRAL 중 하나만 선택",
+                "market_status": "현재 시장 상황 간단 요약(50자 이내)",
+                "risk_level": "HIGH/MEDIUM/LOW 중 하나만 선택"
+            }},
+            "signals": {{
+                "technical": "STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL 중 하나만 선택",
+                "news": "POSITIVE/NEGATIVE/NEUTRAL 중 하나만 선택",
+                "trend": "UP/DOWN/SIDEWAYS 중 하나만 선택"
+            }},
+            "reason": "투자 결정의 주된 이유(100자 이내)"
+        }}
+
+        [필수 규칙 - 위반 시 결과 무효]
+        1. decision은 반드시 "BUY", "SELL", "HOLD" 중 하나여야 합니다 (대문자만).
+        2. percentage는 반드시 0에서 30 사이의 정수여야 합니다 (30 초과 절대 불가).
+        3. HOLD 결정 시 percentage는 반드시 0이어야 합니다.
+        4. BUY 또는 SELL 결정 시 percentage는 1-30 사이의 정수여야 합니다.
+        5. 모든 문자열은 정확히 제시된 선택지 중에서만 선택해야 합니다.
+        6. 모든 점수는 정수값이어야 합니다.
+        7. 모든 문자열은 큰따옴표로 감싸야 합니다.
+        8. JSON 형식을 정확히 지켜야 합니다.
+        9. 추가 설명이나 텍스트를 포함하지 마세요.
+        10. percentage 값이 30을 초과하면 결과가 자동으로 HOLD로 변경됩니다.
+        """
 
         response = llm.invoke(prompt)
         timestamp = datetime.now()
         
-        state['results']['final_decision'] = {
-            'decision': response.content,
-            'timestamp': timestamp.isoformat()
-        }
+        try:
+            # 응답에서 JSON 부분만 추출 (추가 텍스트가 있을 경우를 대비)
+            response_text = response.content.strip()
+            if response_text.startswith('{') and response_text.endswith('}'):
+                decision_json = json.loads(response_text)
+            else:
+                # JSON이 아닌 텍스트가 포함된 경우, JSON 부분만 추출 시도
+                import re
+                json_match = re.search(r'\{[^{]*\}', response_text)
+                if json_match:
+                    decision_json = json.loads(json_match.group(0))
+                else:
+                    raise json.JSONDecodeError("No valid JSON found", response_text, 0)
+            
+            # 필수 필드 검증
+            if not isinstance(decision_json.get('decision'), str) or \
+               decision_json['decision'] not in ['BUY', 'SELL', 'HOLD']:
+                decision_json['decision'] = 'HOLD'
+            
+            if not isinstance(decision_json.get('percentage'), (int, float)) or \
+               not (0 <= decision_json['percentage'] <= 100):
+                decision_json['percentage'] = 0
+                
+            state['results']['final_decision'] = {
+                'decision': decision_json,
+                'timestamp': timestamp.isoformat()
+            }
+            
+        except json.JSONDecodeError as e:
+            print(f"JSON 파싱 오류: {e}")
+            state['results']['final_decision'] = {
+                'decision': {
+                    'decision': 'HOLD',
+                    'percentage': 0,
+                    'analysis': {
+                        'market_status': '시장 분석 실패',
+                        'risk_assessment': '리스크 평가 불가',
+                        'strategy': '관망 추천'
+                    },
+                    'reason': 'JSON 파싱 오류로 인한 기본값 적용'
+                },
+                'timestamp': timestamp.isoformat()
+            }
         
         db_manager.save_final_decision(
             timestamp=timestamp,
             current_price=current_price,
-            analysis_text=response.content
+            analysis_text=json.dumps(state['results']['final_decision']['decision'])
         )
         
         return state
@@ -576,14 +685,6 @@ def execute_trading_decision(state: AgentState) -> None:
 def create_trading_workflow() -> Graph:
     """트레이딩 워크플로우 생성"""
     workflow = StateGraph(AgentState)
-
-    initial_state = {
-        "messages": [], 
-        "next_step": "news_analysis",
-        "results": {},
-        "market_data": {},
-        "symbol": SYMBOL
-    }
     
     # 노드 추가
     workflow.add_node("news_analysis", news_analysis_agent)
@@ -631,7 +732,7 @@ def run_trading_analysis():
                 
                 if 'final_decision' in result['results']:
                     print("\n[최종 결정]")
-                    print(result['results']['final_decision']['decision'])
+                    pprint(result['results']['final_decision']['decision'])
                     
                     # 거래 실행 추가
                     execute_trading_decision(result)
@@ -644,7 +745,7 @@ def run_trading_analysis():
 
 def run_continuous_analysis():
     """30분마다 트레이딩 분석을 실행하는 연속 실행 함수"""
-    WAIT_MINUTES = 2
+    WAIT_MINUTES = 1
     WAIT_SECONDS = WAIT_MINUTES * 60  # 30분을 초로 변환
     
     print("연속 트레이딩 분석 시작...")
