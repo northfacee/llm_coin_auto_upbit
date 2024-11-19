@@ -290,53 +290,25 @@ class BithumbTradeExecutor:
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
             }
 
-    def _parse_decision(self, decision_text: str) -> str:
-        """거래 결정 텍스트 파싱"""
+    def _parse_decision(self, decision_data: dict) -> str:
+        """JSON 형식의 거래 결정 파싱"""
         try:
-            # 결정 텍스트를 줄 단위로 분리하고 소문자로 변환
-            lines = decision_text.lower().split('\n')
-            for line in lines:
-                # "투자결정" 또는 "결정" 키워드가 있는 줄 찾기
-                if '투자결정' in line or '결정' in line:
-                    # 매수/매도/관망 결정 파싱
-                    if '매수' in line:
-                        return 'BUY'
-                    elif '매도' in line or '매각' in line:  # '매각'도 포함
-                        return 'SELL'
-                    elif '관망' in line:
-                        return 'HOLD'
-                    
-                    print(f"파싱된 결정 라인: {line}")
-            
-            print(f"전체 결정 텍스트:\n{decision_text}")
+            if isinstance(decision_data, dict):
+                decision = decision_data.get('decision', '').upper()
+                if decision in ['BUY', 'SELL', 'HOLD']:
+                    return decision
             return 'HOLD'
-            
         except Exception as e:
             print(f"결정 파싱 중 오류: {str(e)}")
             return 'HOLD'
 
-    def _parse_investment_ratio(self, decision_text: str) -> float:
-        """투자 비중 파싱"""
+    def _parse_investment_ratio(self, decision_data: dict) -> float:
+        """JSON 형식의 투자 비중 파싱"""
         try:
-            # 투자 비중/비율 관련 키워드 찾기
-            keywords = ['투자 비중', '투자비중']
-            for keyword in keywords:
-                if keyword in decision_text:
-                    # 해당 라인 추출
-                    lines = decision_text.split('\n')
-                    ratio_line = next((line for line in lines if keyword in line), None)
-                    
-                    if ratio_line:
-                        # 숫자 추출 (백분율)
-                        import re
-                        matches = re.findall(r'(\d+)%', ratio_line)
-                        if matches:
-                            ratio = float(matches[0]) / 100
-                            return min(max(ratio, 0.0), 1.0)
-            
-            # 기본값 반환
+            if isinstance(decision_data, dict):
+                percentage = float(decision_data.get('percentage', 50))
+                return min(max(percentage / 100, 0.0), 1.0)
             return 0.5
-            
         except Exception as e:
             print(f"투자 비중 파싱 중 오류: {str(e)}")
             return 0.5
