@@ -25,22 +25,18 @@ class BithumbTradeExecutor:
         self.api_key_v2 = os.getenv('BITHUMB_API_KEY_V2')
         self.api_secret_v2 = os.getenv('BITHUMB_API_SECRET_V2')
         
-        # COIN 환경변수에서 코인 심볼 가져오기, 기본값은 BTC
         self.symbol = os.getenv('COIN', 'BTC')
         self.db_path = "crypto_analysis.db"
 
         if not self.api_key or not self.api_secret:
             raise ValueError("API credentials not found in environment variables")
         
-        # 코인별 최소 거래량 설정
         self.min_trade_amounts = {
             'BTC': Decimal('0.0001'),
             'XRP': Decimal('5'),
             'DOGE': Decimal('9'),
-            # 필요한 코인 추가
         }
         
-        # 기본 최소 거래량 설정 (목록에 없는 코인용)
         self.default_min_trade_amount = Decimal('1')
     
     def get_min_trade_amount(self) -> Decimal:
@@ -71,16 +67,6 @@ class BithumbTradeExecutor:
             'Api-Nonce': nonce,
             'Api-Sign': encoded_signature
         }
-
-    def _create_jwt_token(self) -> str:
-        """JWT 토큰 생성"""
-        payload = {
-            'access_key': self.api_key_v2,
-            'nonce': str(uuid.uuid4()),
-            'timestamp': round(time.time() * 1000)
-        }
-        jwt_token = jwt.encode(payload, self.api_secret_v2, algorithm='HS256')
-        return f'Bearer {jwt_token}'
 
     def _send_request(self, endpoint: str, params: dict) -> dict:
         """API 요청 전송"""
@@ -117,11 +103,7 @@ class BithumbTradeExecutor:
                 'currency': self.symbol
             }
             
-            #print("잔고 조회 요청 시작...")
-            #print(f"요청 파라미터: {params}")
-            
             response = self._send_request("/info/balance", params)
-            #print(f"API 응답: {response}")
             
             if response.get('status') != '0000':
                 raise Exception(f"잔고 조회 실패: {response.get('message')}")
@@ -129,7 +111,6 @@ class BithumbTradeExecutor:
             data = response.get('data', {})
             symbol = self.symbol.lower()
             
-            # API 응답에서 올바른 키 찾기
             available_coin_key = f'available_{symbol}'
             total_coin_key = f'total_{symbol}'
             
@@ -140,7 +121,6 @@ class BithumbTradeExecutor:
                 f'{symbol}_total': Decimal(str(data.get(total_coin_key, '0')))
             }
             
-            #print(f"변환된 잔고 정보: {result}")
             return result
             
         except Exception as e:
@@ -157,11 +137,9 @@ class BithumbTradeExecutor:
         """현재 포지션 정보 조회"""
         try:
             account_info = self.get_account_info()
-            symbol = self.symbol
             
-            # 코인 데이터 찾기
             coin_data = next((item for item in account_info 
-                        if item.get('currency') == symbol), None)
+                        if item.get('currency') == self.symbol), None)
             
             if not coin_data:
                 return {
@@ -171,22 +149,16 @@ class BithumbTradeExecutor:
                     'investment_ratio': 0
                 }
             
-            # 데이터 추출
             balance = Decimal(str(coin_data.get('balance', '0')))
             locked = Decimal(str(coin_data.get('locked', '0')))
             avg_buy_price = Decimal(str(coin_data.get('avg_buy_price', '0')))
             
-            # 총 수량 (가능 수량 + 거래중 수량)
             total_quantity = balance + locked
-            
-            # 총 투자금액
             total_investment = total_quantity * avg_buy_price
             
-            # KRW 잔고 찾기
             krw_data = next((item for item in account_info 
                         if item.get('currency') == 'KRW'), None)
             
-            # 투자 비율 계산
             if krw_data:
                 krw_balance = Decimal(str(krw_data.get('balance', '0')))
                 total_assets = krw_balance + total_investment
@@ -213,7 +185,6 @@ class BithumbTradeExecutor:
     def execute_trade(self, decision: Dict[str, Any], max_investment: float, current_price: float) -> Dict:
         """거래 결정 실행"""
         try:
-            # 1. 결정 텍스트 파싱
             if isinstance(decision, dict) and 'decision' in decision:
                 decision_text = decision['decision']
                 trade_type = self._parse_decision(decision_text)
@@ -228,13 +199,11 @@ class BithumbTradeExecutor:
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
 
-            # 3. 잔고 확인
             balance = self.get_balance()
             symbol = self.symbol.lower()
             available_krw = Decimal(str(balance['krw_available']))
             available_coin = Decimal(str(balance[f'{symbol}_available']))
 
-            # 4. 투자 비중 계산 및 로깅
             investment_ratio = self._parse_investment_ratio(decision_text)
             max_investment_decimal = Decimal(str(max_investment))
             investment_amount = max_investment_decimal * Decimal(str(investment_ratio))
@@ -245,10 +214,8 @@ class BithumbTradeExecutor:
             print(f"계산된 투자금액: {float(investment_amount):,.0f}원")
             print(f"사용 가능한 KRW: {float(available_krw):,.0f}원")
 
-            # 5. 매수/매도 결정 및 실행
             if trade_type == 'BUY':
-                # 매수 가능 금액 확인
-                if available_krw < Decimal('10000'):  # 최소 주문 금액
+                if available_krw < Decimal('10000'):
                     return {
                         'status': 'ERROR',
                         'type': 'BUY_FAIL',
@@ -256,13 +223,11 @@ class BithumbTradeExecutor:
                         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                     }
                 
-                # 실제 매수 금액 조정
                 actual_investment = min(investment_amount, available_krw)
                 print(f"실제 투자금액: {float(actual_investment):,.0f}원")
                 return self._place_buy_order(actual_investment, Decimal(str(current_price)))
 
             elif trade_type == 'SELL':
-                # 매도 가능 수량 확인
                 if available_coin < self.get_min_trade_amount():
                     return {
                         'status': 'ERROR',
@@ -271,7 +236,6 @@ class BithumbTradeExecutor:
                         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                     }
                 
-                # 매도 수량 계산 (전체 보유량의 investment_ratio 만큼)
                 sell_quantity = available_coin * Decimal(str(investment_ratio))
                 return self._place_sell_order(sell_quantity, Decimal(str(current_price)))
 
@@ -291,7 +255,6 @@ class BithumbTradeExecutor:
             }
 
     def _parse_decision(self, decision_data: dict) -> str:
-        """JSON 형식의 거래 결정 파싱"""
         try:
             if isinstance(decision_data, dict):
                 decision = decision_data.get('decision', '').upper()
@@ -303,7 +266,6 @@ class BithumbTradeExecutor:
             return 'HOLD'
 
     def _parse_investment_ratio(self, decision_data: dict) -> float:
-        """JSON 형식의 투자 비중 파싱"""
         try:
             if isinstance(decision_data, dict):
                 percentage = float(decision_data.get('percentage', 50))
@@ -314,9 +276,7 @@ class BithumbTradeExecutor:
             return 0.5
 
     def _place_buy_order(self, investment_amount: Decimal, price: Decimal) -> Dict:
-        """매수 주문 실행"""
         try:
-            # 1. 수량 계산 - 투자금액을 현재가로 나누어 구매 가능한 수량 계산
             quantity = (investment_amount / price).quantize(Decimal('0.0001'), rounding=ROUND_DOWN)
             
             print(f"투자 계산 정보:")
@@ -324,7 +284,6 @@ class BithumbTradeExecutor:
             print(f"- 현재가: {float(price):,.0f}원")
             print(f"- 계산된 수량: {float(quantity):.8f} {self.symbol}")
             
-            # 2. 최소 거래량 확인
             min_trade_amount = self.get_min_trade_amount()
             if quantity < min_trade_amount:
                 return {
@@ -334,7 +293,6 @@ class BithumbTradeExecutor:
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
 
-            # 3. 주문 파라미터 설정
             params = {
                 'order_currency': self.symbol,
                 'payment_currency': 'KRW',
@@ -343,14 +301,11 @@ class BithumbTradeExecutor:
                 'type': 'bid'
             }
 
-            # 4. API 요청 실행
             response = self._send_request("/trade/place", params)
             
-            # 5. 응답 처리
             if response['status'] != '0000':
                 raise Exception(f"매수 주문 실패: {response.get('message')}")
 
-            # 6. 성공 결과 반환
             return {
                 'status': 'SUCCESS',
                 'type': 'BUY',
@@ -371,9 +326,7 @@ class BithumbTradeExecutor:
             }
 
     def _place_sell_order(self, quantity: Decimal, price: Decimal) -> Dict:
-        """매도 주문 실행"""
         try:
-            # 1. 최소 거래량 확인
             min_trade_amount = self.get_min_trade_amount()
             if quantity < min_trade_amount:
                 return {
@@ -383,7 +336,6 @@ class BithumbTradeExecutor:
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
 
-            # 2. 주문 파라미터 설정
             params = {
                 'order_currency': self.symbol,
                 'payment_currency': 'KRW',
@@ -392,14 +344,11 @@ class BithumbTradeExecutor:
                 'type': 'ask'
             }
 
-            # 3. API 요청 실행
             response = self._send_request("/trade/place", params)
             
-            # 4. 응답 처리
             if response['status'] != '0000':
                 raise Exception(f"매도 주문 실패: {response.get('message')}")
 
-            # 5. 성공 결과 반환
             return {
                 'status': 'SUCCESS',
                 'type': 'SELL',
@@ -418,65 +367,8 @@ class BithumbTradeExecutor:
                 'message': str(e),
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
             }
-        
-    def get_current_position(self) -> Dict[str, Any]:
-        """현재 포지션 정보 조회"""
-        try:
-            account_info = self.get_account_info()
-            
-            # self.symbol 사용 (하드코딩된 'DOGE' 대신)
-            coin_data = next((item for item in account_info 
-                        if item.get('currency') == self.symbol), None)
-            
-            if not coin_data:
-                return {
-                    'avg_price': 0,
-                    'total_quantity': 0,
-                    'total_investment': 0,
-                    'investment_ratio': 0
-                }
-            
-            # 데이터 추출
-            balance = Decimal(str(coin_data.get('balance', '0')))
-            locked = Decimal(str(coin_data.get('locked', '0')))
-            avg_buy_price = Decimal(str(coin_data.get('avg_buy_price', '0')))
-            
-            # 총 수량 (가능 수량 + 거래중 수량)
-            total_quantity = balance + locked
-            
-            # 총 투자금액
-            total_investment = total_quantity * avg_buy_price
-            
-            # KRW 잔고 찾기
-            krw_data = next((item for item in account_info 
-                        if item.get('currency') == 'KRW'), None)
-            
-            # 투자 비율 계산
-            if krw_data:
-                krw_balance = Decimal(str(krw_data.get('balance', '0')))
-                total_assets = krw_balance + total_investment
-                investment_ratio = (total_investment / total_assets * 100) if total_assets > 0 else Decimal('0')
-            else:
-                investment_ratio = Decimal('0')
-            
-            return {
-                'avg_price': float(avg_buy_price),
-                'total_quantity': float(total_quantity),
-                'total_investment': float(total_investment),
-                'investment_ratio': float(investment_ratio)
-            }
-                    
-        except Exception as e:
-            print(f"포지션 정보 조회 중 오류 발생: {str(e)}")
-            return {
-                'avg_price': 0,
-                'total_quantity': 0,
-                'total_investment': 0,
-                'investment_ratio': 0
-            }
 
     def _get_current_price(self) -> float:
-        """현재 BTC 가격 조회"""
         try:
             url = f"{self.api_url}/public/ticker/{self.symbol}_KRW"
             response = requests.get(url)
@@ -490,3 +382,167 @@ class BithumbTradeExecutor:
         except Exception as e:
             print(f"현재가 조회 중 오류 발생: {str(e)}")
             return 0
+
+    def _convert_market_format(self, market: str, to_order: bool = False) -> str:
+        """마켓 포맷 변환
+        DOGE_KRW <-> KRW-DOGE
+        """
+        if to_order:
+            if '-' in market:
+                quote, base = market.split('-')
+                return f"{base}_{quote}"
+        else:
+            if '_' in market:
+                base, quote = market.split('_')
+                return f"{quote}-{base}"
+        return market
+
+    def get_orders(self, market: str, state: str = 'wait', uuids: list = None) -> list:
+        """미체결 주문 조회"""
+        try:
+            query_market = self._convert_market_format(market=market, to_order=False)
+            params = {
+                'market': query_market,
+                'state': state,
+                'limit': 100,
+                'page': 1,
+                'order_by': 'desc'
+            }
+            
+            query = urllib.parse.urlencode(params)
+            
+            if uuids:
+                uuid_query = '&'.join([f'uuids[]={uuid}' for uuid in uuids])
+                query = f"{query}&{uuid_query}"
+            
+            hash = hashlib.sha512()
+            hash.update(query.encode())
+            query_hash = hash.hexdigest()
+            
+            payload = {
+                'access_key': self.api_key_v2,
+                'nonce': str(uuid.uuid4()),
+                'timestamp': round(time.time() * 1000),
+                'query_hash': query_hash,
+                'query_hash_alg': 'SHA512'
+            }
+            
+            jwt_token = jwt.encode(payload, self.api_secret_v2, algorithm='HS256')
+            headers = {
+                'Authorization': f'Bearer {jwt_token}'
+            }
+            
+            response = requests.get(
+                f"{self.api_url}/v1/orders?{query}",
+                headers=headers
+            )
+            
+            if response.status_code != 200:
+                #print(f"API 응답: {response.text}")
+                return []
+                
+            return response.json()
+            
+        except Exception as e:
+            print(f"주문 조회 중 오류 발생: {str(e)}")
+            return []
+
+    def check_and_cancel_old_orders(self, market: Optional[str] = None) -> None:
+        """10분 이상 경과된 미체결 주문 취소"""
+        try:
+            if market is None:
+                market = f"{self.symbol}_KRW"
+                
+            orders = self.get_orders(market=market, state='wait')
+            current_time = datetime.now()
+            
+            for order in orders:
+                try:
+                    # ISO 8601 형식의 시간을 파싱
+                    created_at = order['created_at']
+                    if 'T' in created_at:  # ISO 8601 형식 확인
+                        # 타임존 제거 및 포맷 변환
+                        order_time = datetime.fromisoformat(created_at.split('+')[0])
+                    else:
+                        order_time = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+                    
+                    elapsed_time = current_time - order_time
+                    
+                    if elapsed_time.total_seconds() > 600:
+                        print(f"10분 경과 미체결 주문 취소 - Order ID: {order['uuid']}")
+                        cancel_result = self.cancel_order(order['uuid'])
+                        
+                        if cancel_result.get('status') == 'ERROR':
+                            print(f"주문 취소 실패: {cancel_result.get('message')}")
+                        else:
+                            print("주문이 성공적으로 취소되었습니다.")
+                            
+                except Exception as e:
+                    print(f"개별 주문 처리 중 오류: {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            print(f"미체결 주문 확인/취소 중 오류: {str(e)}")
+
+    def _create_jwt_token(self) -> str:
+        """JWT 토큰 생성"""
+        payload = {
+            'access_key': self.api_key_v2,
+            'nonce': str(uuid.uuid4()),
+            'timestamp': round(time.time() * 1000)
+        }
+        
+        jwt_token = jwt.encode(payload, self.api_secret_v2, algorithm='HS256')
+        return f'Bearer {jwt_token}'
+    
+    def cancel_order(self, uuid_str: str, market: Optional[str] = None) -> dict:
+        """주문 취소"""
+        try:
+            market = f"{self.symbol}_KRW"
+                
+            params = {
+                'uuid': uuid_str,
+                'market': self._convert_market_format(market=market, to_order=True)
+            }
+            query = urllib.parse.urlencode(params).encode()
+            
+            hash = hashlib.sha512()
+            hash.update(query)
+            query_hash = hash.hexdigest()
+            
+            nonce = uuid.uuid4()  # uuid를 직접 생성
+            
+            payload = {
+                'access_key': self.api_key_v2,
+                'nonce': str(nonce),
+                'timestamp': round(time.time() * 1000),
+                'query_hash': query_hash,
+                'query_hash_alg': 'SHA512'
+            }
+            
+            jwt_token = jwt.encode(payload, self.api_secret_v2)
+            headers = {
+                'Authorization': f'Bearer {jwt_token}'
+            }
+            
+            response = requests.delete(
+                f"{self.api_url}/v1/order",
+                params=params,
+                headers=headers
+            )
+            
+            if response.status_code != 200:
+                #print(f"API 응답: {response.text}")
+                return {'status': 'ERROR', 'message': response.text}
+                
+            return response.json()
+            
+        except Exception as e:
+            error_message = str(e)
+            print(f"주문 취소 중 오류 발생: {error_message}")
+            return {
+                'status': 'ERROR',
+                'type': 'CANCEL_FAIL', 
+                'message': error_message,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }

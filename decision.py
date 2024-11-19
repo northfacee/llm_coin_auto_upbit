@@ -479,6 +479,13 @@ def final_decision_agent(state: AgentState) -> AgentState:
                     'decision': auto_decision,
                     'timestamp': datetime.now().isoformat()
                 }
+
+                                # JSON으로 저장할 때 한글 인코딩 처리
+                db_manager.save_final_decision(
+                    timestamp=datetime.now(),
+                    current_price=current_price,
+                    analysis_text=json.dumps(auto_decision, ensure_ascii=False)
+                )
                 
                 return state
             
@@ -526,17 +533,16 @@ def final_decision_agent(state: AgentState) -> AgentState:
         {{
             "decision": "BUY/SELL/HOLD 중 하나만 선택",
             "percentage": "반드시 0-30 사이의 정수만 가능 (30 초과 절대 불가)",
-            "price_score": -5에서 5 사이의 정수값(음수: 하락예상, 양수: 상승예상, 절대값: 신뢰도),
-            "news_score": -2에서 2 사이의 정수값(음수: 부정적, 양수: 긍정적),
+            
             "analysis": {{
-                "market_trend": "BULLISH/BEARISH/NEUTRAL 중 하나만 선택",
+                "market_trend": "강세/약세/중립 중 하나만 선택",
                 "market_status": "현재 시장 상황 간단 요약(50자 이내)",
-                "risk_level": "HIGH/MEDIUM/LOW 중 하나만 선택"
+                "risk_level": "상/중/하 중 하나만 선택"
             }},
             "signals": {{
-                "technical": "STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL 중 하나만 선택",
-                "news": "POSITIVE/NEGATIVE/NEUTRAL 중 하나만 선택",
-                "trend": "UP/DOWN/SIDEWAYS 중 하나만 선택"
+                "technical": "강력매수/매수/중립/매도/강력매도 중 하나만 선택",
+                "news": "긍정/부정/중립 중 하나만 선택",
+                "trend": "상승/하락/횡보 중 하나만 선택"
             }},
             "reason": "투자 결정의 주된 이유(100자 이내)"
         }}
@@ -571,41 +577,48 @@ def final_decision_agent(state: AgentState) -> AgentState:
                 else:
                     raise json.JSONDecodeError("No valid JSON found", response_text, 0)
             
-            # 필수 필드 검증
-            if not isinstance(decision_json.get('decision'), str) or \
-               decision_json['decision'] not in ['BUY', 'SELL', 'HOLD']:
-                decision_json['decision'] = 'HOLD'
-            
-            if not isinstance(decision_json.get('percentage'), (int, float)) or \
-               not (0 <= decision_json['percentage'] <= 100):
-                decision_json['percentage'] = 0
-                
             state['results']['final_decision'] = {
                 'decision': decision_json,
                 'timestamp': timestamp.isoformat()
             }
+
+                        # JSON으로 저장할 때 한글 인코딩 처리
+            db_manager.save_final_decision(
+                timestamp=datetime.now(),
+                current_price=current_price,
+                analysis_text=json.dumps(decision_json, ensure_ascii=False, indent=2)
+            )
             
         except json.JSONDecodeError as e:
             print(f"JSON 파싱 오류: {e}")
-            state['results']['final_decision'] = {
-                'decision': {
-                    'decision': 'HOLD',
-                    'percentage': 0,
-                    'analysis': {
-                        'market_status': '시장 분석 실패',
-                        'risk_assessment': '리스크 평가 불가',
-                        'strategy': '관망 추천'
-                    },
-                    'reason': 'JSON 파싱 오류로 인한 기본값 적용'
+            default_decision = {
+                'decision': 'HOLD',
+                'percentage': 0,
+                'price_score': 0,
+                'news_score': 0,
+                'analysis': {
+                    'market_trend': 'NEUTRAL',
+                    'market_status': '분석 실패',
+                    'risk_level': 'HIGH'
                 },
-                'timestamp': timestamp.isoformat()
+                'signals': {
+                    'technical': 'NEUTRAL',
+                    'news': 'NEUTRAL',
+                    'trend': 'SIDEWAYS'
+                },
+                'reason': 'JSON 파싱 오류로 인한 자동 HOLD 결정'
             }
-        
-        db_manager.save_final_decision(
-            timestamp=timestamp,
-            current_price=current_price,
-            analysis_text=json.dumps(state['results']['final_decision']['decision'])
-        )
+            
+            state['results']['final_decision'] = {
+                'decision': default_decision,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            db_manager.save_final_decision(
+                timestamp=datetime.now(),
+                current_price=current_price,
+                analysis_text=json.dumps(default_decision, ensure_ascii=False, indent=2)
+            )
         
         return state
     
@@ -617,6 +630,9 @@ def execute_trading_decision(state: AgentState) -> None:
             return
 
         timestamp = datetime.now()
+
+        # 오래된 미체결 주문 취소 처리
+        trade_executor.check_and_cancel_old_orders()
         
         try:
             final_decision = state['results']['final_decision']
