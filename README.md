@@ -21,7 +21,7 @@
 
 1. 저장소 클론
 ```bash
-git clone https://github.com/northfacee/llm_coin_auto.git
+git clone https://github.com/northfacee/llm_coin_auto_upbit.git
 cd test
 ```
 
