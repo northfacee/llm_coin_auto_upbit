@@ -3,7 +3,7 @@ from typing import List, Dict, Tuple, Optional
 
 class TechnicalIndicators:
     @staticmethod
-    def calculate_moving_averages(prices: np.array, periods: List[int]) -> Dict[int, float]:
+    def calculate_moving_averages(prices: np.array, periods: List[int] = [5, 10, 20, 50, 200]) -> Dict[int, float]:
         """여러 기간의 이동평균 계산"""
         mas = {}
         for period in periods:

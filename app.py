@@ -5,9 +5,10 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 from database_manager import DatabaseManager
-from trading import BithumbTradeExecutor  # BithumbTradeExecutor 추가
+from trading import UpbitTradeExecutor  # BithumbTradeExecutor 추가
 import os
 from dotenv import load_dotenv
+import pyupbit
 
 load_dotenv()
 
@@ -16,21 +17,20 @@ try:
 except TypeError:
     raise ValueError("INVESTMENT 환경변수가 설정되지 않았습니다. .env 파일을 확인해주세요.")
     
-trader = BithumbTradeExecutor()
+trader = UpbitTradeExecutor()
 balance = trader.get_balance()
 symbol = os.getenv('COIN', 'BTC')
+market = f"KRW-{symbol}"
 
 def get_account_balance():
     """계좌 잔고 및 수익률 정보 조회"""
     try:
-        trader = BithumbTradeExecutor()
-        symbol = os.getenv('COIN', 'DOGE')
+        trader = UpbitTradeExecutor()
+        symbol = os.getenv('COIN', 'BTC')
         balance = trader.get_balance()
         
         # 현재가 조회
-        market_url = f"https://api.bithumb.com/public/ticker/{symbol}_KRW"
-        market_response = requests.get(market_url).json()
-        current_price = float(market_response['data']['closing_price'])
+        current_price = pyupbit.get_current_price(f"KRW-{symbol}")
         
         # 코인 보유량
         coin_available = float(balance[f'{symbol.lower()}_available'])
@@ -47,13 +47,13 @@ def get_account_balance():
         profit_rate = ((total_value - INVESTMENT) / INVESTMENT * 100) if INVESTMENT > 0 else 0
         
         return {
-            'total_value': coin_value + krw_available,  # 총 자산
-            'profit': profit,  # 순수익
-            'profit_rate': profit_rate,  # 수익률
-            'krw_available': krw_available,  # 원화 잔고
-            'coin_available': coin_available,  # 코인 보유량
-            'coin_value': coin_value,  # 코인 가치
-            'current_price': current_price  # 현재가
+            'total_value': total_value,
+            'profit': profit,
+            'profit_rate': profit_rate,
+            'krw_available': krw_available,
+            'coin_available': coin_available,
+            'coin_value': coin_value,
+            'current_price': current_price
         }
     except Exception as e:
         print(f"잔고 조회 중 오류 발생: {e}")
@@ -191,33 +191,39 @@ def display_metrics():
             </div>
             """, unsafe_allow_html=True)
 
-def get_bithumb_candle_data(interval='1m', count=100):
-    """빗썸 API에서 실시간 캔들 데이터 조회"""
+def get_upbit_candle_data(interval='minute1', count=100):
+    """업비트 API에서 실시간 캔들 데이터 조회"""
     try:
-        url = f"https://api.bithumb.com/public/candlestick/{trader.symbol}_KRW/{interval}"
-        response = requests.get(url)
-        data = response.json()
+        # interval 변환
+        interval_map = {
+            '1m': 'minute1',
+            '3m': 'minute3',
+            '5m': 'minute5',
+            '10m': 'minute10',
+            '30m': 'minute30',
+            '1h': 'minute60',
+            '6h': 'minute360',
+            '12h': 'minute720',
+            '24h': 'day'
+        }
         
-        if data['status'] == '0000':
-            # 데이터 변환
-            df = pd.DataFrame(data['data'], columns=[
-                'timestamp', 'opening_price', 'closing_price',
-                'high_price', 'low_price', 'acc_trade_volume'
-            ])
+        upbit_interval = interval_map.get(interval, 'minute1')
+        df = pyupbit.get_ohlcv(market, interval=upbit_interval, count=count)
+        
+        if df is not None:
+            df = df.reset_index()
+            df = df.rename(columns={
+                'index': 'timestamp',
+                'open': 'opening_price',
+                'high': 'high_price',
+                'low': 'low_price',
+                'close': 'closing_price',
+                'volume': 'acc_trade_volume'
+            })
+            return df
             
-            # 타임스탬프를 datetime으로 변환 (밀리초를 초로 변환) 및 KST로 변환
-            df['timestamp'] = pd.to_datetime(df['timestamp'].astype(float), unit='ms')
-            df['timestamp'] = df['timestamp'] + pd.Timedelta(hours=9)  # UTC to KST
-            
-            # 데이터 타입 변환
-            numeric_columns = ['opening_price', 'closing_price', 'high_price', 
-                             'low_price', 'acc_trade_volume']
-            df[numeric_columns] = df[numeric_columns].astype(float)
-            
-            # 최근 count개만큼 데이터 반환
-            return df.tail(count)
     except Exception as e:
-        print(f"빗썸 API 호출 중 오류 발생: {e}")
+        print(f"업비트 API 호출 중 오류 발생: {e}")
         return pd.DataFrame()
 
 def create_trading_chart(market_df, trade_df):
@@ -446,11 +452,10 @@ def display_analysis_results(latest_analysis, all_analysis):
             st.text_area("Analysis", row['analysis_text'], height=200, key=f"{row['timestamp']}_{row['analysis_type']}")
 
 def main():
-    st.set_page_config(page_title='Bithumb Trading Monitor', 
+    st.set_page_config(page_title='Upbit Trading Monitor', 
                       layout='wide',
                       initial_sidebar_state='expanded')
     
-    # 세션 상태 초기화
     if 'refresh_interval' not in st.session_state:
         st.session_state.refresh_interval = 30
     if 'candle_interval' not in st.session_state:
@@ -458,41 +463,13 @@ def main():
     if 'candle_count' not in st.session_state:
         st.session_state.candle_count = 100
 
-    # 스타일 설정 (이전과 동일)
-    st.markdown("""
-        <style>
-        .stApp {
-            background-color: #1e1e1e;
-            color: white;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 20px;
-        }
-        .stTabs [data-baseweb="tab"] {
-            height: 50px;
-            white-space: pre-wrap;
-            background-color: #2d2d2d;
-            border-radius: 4px;
-            padding: 10px;
-        }
-        .stTabs [aria-selected="true"] {
-            background-color: #0e84b5;
-        }
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        </style>
-        """, unsafe_allow_html=True)
+    # [이전과 동일한 스타일 설정]
     
     st.title(f'{symbol} 자동매매 모니터링')
 
-    # 데이터베이스 매니저 초기화
     db = DatabaseManager()
-
     display_metrics()
 
-    # 사이드바 설정
     st.sidebar.header('설정')
     
     # 새로고침 간격 설정
@@ -503,14 +480,13 @@ def main():
         value=st.session_state.refresh_interval
     )
 
-    # 캔들 간격 설정
+    # 캔들 간격 설정 (업비트에서 지원하는 간격으로 수정)
     st.session_state.candle_interval = st.sidebar.selectbox(
         '캔들 간격',
         ['1m', '3m', '5m', '10m', '30m', '1h', '6h', '12h', '24h'],
         index=['1m', '3m', '5m', '10m', '30m', '1h', '6h', '12h', '24h'].index(st.session_state.candle_interval)
     )
 
-    # 캔들 개수 설정
     st.session_state.candle_count = st.sidebar.slider(
         '캔들 개수', 
         min_value=20, 
@@ -521,10 +497,8 @@ def main():
     # 탭 생성
     tabs = st.tabs(["비트코인 차트", "매매 히스토리", "분석 결과"])
 
-    # Trading Chart 탭
     with tabs[0]:
-        # 실시간 데이터 로드
-        market_df = get_bithumb_candle_data(st.session_state.candle_interval, st.session_state.candle_count)
+        market_df = get_upbit_candle_data(st.session_state.candle_interval, st.session_state.candle_count)
         trade_df = get_trade_executions(db, hours=24)
 
         if not market_df.empty:
@@ -532,20 +506,17 @@ def main():
             fig = create_trading_chart(market_df, trade_df)
             chart_container.plotly_chart(fig, use_container_width=True)
         else:
-            st.error("Failed to load market data from Bithumb API.")
+            st.error("Failed to load market data from Upbit API.")
 
-    # Trade History 탭
     with tabs[1]:
         display_trade_history(trade_df)
 
-    # Analysis Results 탭
     with tabs[2]:
         latest_analysis = db.get_latest_full_analysis()
         all_analysis = db.get_all_analysis_results(hours=24)
-        #print(all_analysis)
         display_analysis_results(latest_analysis, all_analysis)
 
-    # 자동 새로고침 적용
+    # 자동 새로고침
     st.markdown(f"""
         <meta http-equiv="refresh" content="{st.session_state.refresh_interval}">
         <script>
@@ -553,11 +524,10 @@ def main():
         </script>
     """, unsafe_allow_html=True)
 
-    # 현재 시간 표시
+    # 사이드바 정보
     st.sidebar.markdown("---")
     st.sidebar.write("최근 업데이트 시간:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-    # main() 함수 내 trade_df 로드 후
     if not trade_df.empty:
         st.sidebar.write("거래 데이터 확인:")
         st.sidebar.write(f"총 거래 건수: {len(trade_df)}")

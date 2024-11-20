@@ -77,6 +77,7 @@ pyparsing==3.2.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 pytz==2024.2
+pyupbit==0.2.34
 PyYAML==6.0.2
 referencing==0.35.1
 regex==2024.9.11
@@ -100,5 +101,6 @@ tzdata==2024.2
 urllib3==2.2.3
 watchdog==5.0.3
 webencodings==0.5.1
+websockets==14.1
 yarl==1.17.1
 yfinance==0.2.48

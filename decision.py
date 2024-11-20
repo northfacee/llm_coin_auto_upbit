@@ -10,12 +10,15 @@ from langsmith import Client
 import langsmith
 from dotenv import load_dotenv
 from database_manager import DatabaseManager
-from price_collector import BithumbTrader
 from news_collector import NaverNewsCollector
-from trading import BithumbTradeExecutor
 import time
 import traceback  # traceback 모듈 추가
 from pprint import pprint
+
+from database_manager import DatabaseManager
+from price_collector import UpbitTrader
+from news_collector import NaverNewsCollector
+from trading import UpbitTradeExecutor
 
 # 환경 변수 및 LangSmith 설정
 load_dotenv()
@@ -44,8 +47,8 @@ class AgentState(TypedDict):
 
 # 글로벌 인스턴스 초기화
 db_manager = DatabaseManager()
-trader = BithumbTrader()
-trade_executor = BithumbTradeExecutor()
+trader = UpbitTrader()
+trade_executor = UpbitTradeExecutor()
 langsmith_client = Client()
 
 def collect_latest_news():

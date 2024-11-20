@@ -45,11 +45,8 @@ LANGSMITH_API_KEY=your_langsmith_api_key
 NAVER_CLIENT_ID=your_naver_api_key
 NAVER_CLIENT_SECRET=your_naver_api_secret_key
 
-BITHUMB_API_KEY=your_bithumb_api_key
-BITHUMB_API_SECRET=your_bithumb_api_secret_key
-
-BITHUMB_API_KEY_V2=your_bithumb_v2_api_key
-BITHUMB_API_SECRET_V2=your_bithumb_v2_api_secret_key
+UPBIT_ACCESS_KEY=your_upbit_api_key
+UPBIT_SECRET_KEY=your_upbit_api_secret_key
 
 INVESTMENT= your_initial_money #예시 1000000
 COIN=your_coin #예시 BTC, DOGE
