@@ -390,8 +390,7 @@ def get_trade_executions(db, hours=24):
             trade_type,
             quantity,
             price,
-            total_amount,
-            order_id
+            total_amount
         FROM trade_executions
         WHERE timestamp >= datetime('now', ?)
         ORDER BY timestamp DESC
