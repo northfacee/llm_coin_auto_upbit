@@ -560,7 +560,6 @@ def final_decision_agent(state: AgentState) -> AgentState:
         7. 모든 문자열은 큰따옴표로 감싸야 합니다.
         8. JSON 형식을 정확히 지켜야 합니다.
         9. 추가 설명이나 텍스트를 포함하지 마세요.
-        10. percentage 값이 30을 초과하면 결과가 자동으로 HOLD로 변경됩니다.
         """
 
         response = llm.invoke(prompt)
@@ -638,12 +637,13 @@ def execute_trading_decision(state: AgentState) -> None:
         trade_executor.check_and_cancel_old_orders()
         
         try:
-            final_decision = state['results']['final_decision']
+            # final_decision 전체를 전달하도록 수정
+            final_decision = state['results']['final_decision']  # 'decision' 키를 제거
             current_price = float(state['market_data']['current_price']['closing_price'])
             
             # 거래 실행
             result = trade_executor.execute_trade(
-                decision=final_decision,
+                decision=final_decision,  # final_decision 전체를 전달
                 max_investment=INVESTMENT,
                 current_price=current_price
             )
@@ -658,7 +658,7 @@ def execute_trading_decision(state: AgentState) -> None:
                     timestamp=timestamp,
                     trade_type='HOLD',
                     quantity=0,
-                    price=current_price,  # 현재가 사용
+                    price=current_price,
                     total_amount=0,
                     order_id=f"HOLD_{timestamp.strftime('%Y%m%d%H%M%S')}"
                 )
@@ -678,7 +678,7 @@ def execute_trading_decision(state: AgentState) -> None:
                     timestamp=timestamp,
                     trade_type=result.get('type', 'ERROR'),
                     quantity=0,
-                    price=current_price,  # 현재가 사용
+                    price=current_price,
                     total_amount=0,
                     order_id=f"ERROR_{timestamp.strftime('%Y%m%d%H%M%S')}"
                 )
@@ -691,7 +691,7 @@ def execute_trading_decision(state: AgentState) -> None:
                 timestamp=timestamp,
                 trade_type='ERROR',
                 quantity=0,
-                price=current_price,  # 현재가 사용
+                price=current_price,
                 total_amount=0,
                 order_id=f"ERROR_{timestamp.strftime('%Y%m%d%H%M%S')}"
             )
